@@ -2,10 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/docker/docker/daemon/graphdriver/copy"
 )
@@ -23,10 +26,16 @@ type mkfs struct {
 	name      string
 	mountArgs string
 	from      string
+	useInit   bool
 }
 
 func (m *mkfs) Size(s string) *mkfs {
 	m.size = s
+	return m
+}
+
+func (m *mkfs) UseInit(p bool) *mkfs {
+	m.useInit = p
 	return m
 }
 
@@ -82,32 +91,114 @@ func (m *mkfs) Execute() error {
 		return fmt.Errorf("failed to create filesystem: %v", err)
 	}
 
-	// if there is a file to copy from
-	if Exists(m.from) {
-		temp, rmDir, err := mktemp()
+	if m.useInit {
+		repo := "github.com/thi-startup/init@latest"
+		path, err := exec.LookPath("go")
+		if err != nil && !Exists("/usr/local/go/bin/go") {
+			return fmt.Errorf("failed to get go path: %v", err)
+		}
+		if path == "" {
+			path = "/usr/local/go/bin/go"
+		}
+		install := exec.Command(path, "install", repo)
+		if err := install.Run(); err != nil {
+			return fmt.Errorf("failed to install thi-startup init: %v", err)
+		}
+
+		initPath := filepath.Join(os.Getenv("HOME"), "go", "bin", "init")
+		if !Exists(initPath) {
+			return fmt.Errorf("failed to install thi-startup init")
+		}
+
+		initDir, rmDir, err := mktemp()
 		if err != nil {
-			return fmt.Errorf("failed to make temporary directory: %v", err)
+			return err
 		}
 
 		defer func() {
 			if err := rmDir(); err != nil {
-				log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
+				log.Fatalf("failed to remove temp dir: '%s': %v", initDir, err)
 			}
 		}()
 
-		mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
-		if err := mount.Run(); err != nil {
-			return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+		if err := copyFile(initPath, filepath.Join(initDir, "init")); err != nil {
+			return fmt.Errorf("failed to copy init: %v", err)
 		}
 
-		if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
-			return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
+		runJson, err := exec.Command("curl", "-s", "https://raw.githubusercontent.com/thi-startup/init/main/run.json").CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to download run.json from init repo: %v", err)
 		}
 
-		umount := exec.Command(umountPath, temp)
-		if err := umount.Run(); err != nil {
-			return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+		configDir := filepath.Join(initDir, "thi")
+
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			return fmt.Errorf("failed to create config dir in init drive: %v", err)
 		}
+
+		if err := os.WriteFile(filepath.Join(configDir, "run.json"), runJson, 0755); err != nil {
+			return fmt.Errorf("failed to create run.json file: %v", err)
+		}
+		m.from = initDir
+	}
+
+	temp, rmDir, err := mktemp()
+	if err != nil {
+		return fmt.Errorf("failed to make temporary directory: %v", err)
+	}
+
+	defer func() {
+		if err := rmDir(); err != nil {
+			log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
+		}
+	}()
+
+	mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
+	if err := mount.Run(); err != nil {
+		return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+	}
+
+	if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
+		return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
+	}
+
+	umount := exec.Command(umountPath, temp)
+	if err := umount.Run(); err != nil {
+		return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+	}
+
+	return nil
+}
+
+func copyFile(src, dest string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	fi, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	destFile, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, fi.Mode())
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	if _, err := io.Copy(destFile, srcFile); err != nil {
+		return err
+	}
+
+	stat, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return fmt.Errorf("failed to get stats for %s", src)
+	}
+
+	if err := destFile.Chown(int(stat.Uid), int(stat.Gid)); err != nil {
+		return fmt.Errorf("chown failed: %v", err)
 	}
 
 	return nil
