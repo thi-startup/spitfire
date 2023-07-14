@@ -26,7 +26,8 @@ type mkfs struct {
 	name      string
 	mountArgs string
 	from      string
-	useInit   bool
+	makeInit  bool
+	initFrom  string
 }
 
 func (m *mkfs) Size(s string) *mkfs {
@@ -34,8 +35,9 @@ func (m *mkfs) Size(s string) *mkfs {
 	return m
 }
 
-func (m *mkfs) UseInit(p bool) *mkfs {
-	m.useInit = p
+func (m *mkfs) MakeInit(p bool, from string) *mkfs {
+	m.makeInit = p
+	m.initFrom = from
 	return m
 }
 
@@ -75,14 +77,97 @@ func mktemp() (string, func() error, error) {
 	return name, rm, nil
 }
 
+func getGoPath() (string, error) {
+	path, err := exec.LookPath("go")
+
+	if err != nil && !Exists("/usr/local/go/bin/go") {
+		return "", fmt.Errorf("failed to get go path: %v", err)
+	} else if path == "" {
+		return "/usr/local/go/bin/go", nil
+	}
+
+	return path, nil
+}
+
+func installInitFromGithub() (initPath string, runConfig []byte, err error) {
+	repo := "github.com/thi-startup/init@latest"
+
+	goPath, err := getGoPath()
+	if err != nil {
+		return
+	}
+
+	install := exec.Command(goPath, "install", repo)
+	if err := install.Run(); err != nil {
+		return "", nil, fmt.Errorf("failed to install thi-startup init: %v", err)
+	}
+
+	initPath = filepath.Join(os.Getenv("HOME"), "go", "bin", "init")
+	if !Exists(initPath) {
+		return "", nil, fmt.Errorf("failed to install thi-startup init")
+	}
+
+	runConfig, err = exec.Command("curl", "-s", "https://raw.githubusercontent.com/thi-startup/init/main/run.json").CombinedOutput()
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to download run.json from init repo: %v", err)
+	}
+	return
+}
+
+func cdWithRetFunc(dir string) (func() error, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pwd: %v", err)
+	}
+
+	chDir := func(d string) error {
+		if err := os.Chdir(d); err != nil {
+			return fmt.Errorf("failed to cd into %s: %v", d, err)
+		}
+		return nil
+	}
+
+	if err := chDir(dir); err != nil {
+		return nil, err
+	}
+
+	return func() error { return chDir(pwd) }, nil
+}
+
+func useLocalInit(repo string) (initPath string, runConfig []byte, err error) {
+	goPath, err := getGoPath()
+	if err != nil {
+		return
+	}
+
+	goBack, err := cdWithRetFunc(repo)
+	if err != nil {
+		return
+	}
+	defer goBack()
+
+	install := exec.Command(goPath, "build", ".")
+	if err := install.Run(); err != nil {
+		return "", nil, fmt.Errorf("failed to build thi-startup init: %v", err)
+	}
+
+	if initPath, err = filepath.Abs("./init"); err != nil {
+		return
+	}
+
+	if runConfig, err = os.ReadFile("./run.json"); err != nil {
+		return
+	}
+
+	return
+}
+
 func (m *mkfs) Execute() error {
-	// fallocate -l 10M name
 	fallocate := exec.Command(fallocatePath, "-l", m.size, m.name)
 	if err := fallocate.Run(); err != nil {
 		return nil
 	}
 
-	// mkfs.ext2 name
 	if !Exists(m.fscmd) {
 		return fmt.Errorf("could not find '%s'", m.fscmd)
 	}
@@ -91,23 +176,26 @@ func (m *mkfs) Execute() error {
 		return fmt.Errorf("failed to create filesystem: %v", err)
 	}
 
-	if m.useInit {
-		repo := "github.com/thi-startup/init@latest"
-		path, err := exec.LookPath("go")
-		if err != nil && !Exists("/usr/local/go/bin/go") {
-			return fmt.Errorf("failed to get go path: %v", err)
-		}
-		if path == "" {
-			path = "/usr/local/go/bin/go"
-		}
-		install := exec.Command(path, "install", repo)
-		if err := install.Run(); err != nil {
-			return fmt.Errorf("failed to install thi-startup init: %v", err)
-		}
+	if m.makeInit {
+		var (
+			initPath string
+			runJson  []byte
+			err      error
+		)
 
-		initPath := filepath.Join(os.Getenv("HOME"), "go", "bin", "init")
-		if !Exists(initPath) {
-			return fmt.Errorf("failed to install thi-startup init")
+		if !Exists(m.initFrom) {
+			if initPath, runJson, err = installInitFromGithub(); err != nil {
+				return err
+			}
+		} else {
+			abs, err := filepath.Abs(m.initFrom)
+			if err != nil {
+				return fmt.Errorf("failed get absolute path of local repo: %v", err)
+			}
+
+			if initPath, runJson, err = useLocalInit(abs); err != nil {
+				return err
+			}
 		}
 
 		initDir, rmDir, err := mktemp()
@@ -125,11 +213,6 @@ func (m *mkfs) Execute() error {
 			return fmt.Errorf("failed to copy init: %v", err)
 		}
 
-		runJson, err := exec.Command("curl", "-s", "https://raw.githubusercontent.com/thi-startup/init/main/run.json").CombinedOutput()
-		if err != nil {
-			return fmt.Errorf("failed to download run.json from init repo: %v", err)
-		}
-
 		configDir := filepath.Join(initDir, "thi")
 
 		if err := os.MkdirAll(configDir, 0755); err != nil {
@@ -142,29 +225,31 @@ func (m *mkfs) Execute() error {
 		m.from = initDir
 	}
 
-	temp, rmDir, err := mktemp()
-	if err != nil {
-		return fmt.Errorf("failed to make temporary directory: %v", err)
-	}
-
-	defer func() {
-		if err := rmDir(); err != nil {
-			log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
+	if m.makeInit || Exists(m.from) {
+		temp, rmDir, err := mktemp()
+		if err != nil {
+			return fmt.Errorf("failed to make temporary directory: %v", err)
 		}
-	}()
 
-	mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
-	if err := mount.Run(); err != nil {
-		return fmt.Errorf("failed to mount '%s': %v", m.name, err)
-	}
+		defer func() {
+			if err := rmDir(); err != nil {
+				log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
+			}
+		}()
 
-	if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
-		return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
-	}
+		mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
+		if err := mount.Run(); err != nil {
+			return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+		}
 
-	umount := exec.Command(umountPath, temp)
-	if err := umount.Run(); err != nil {
-		return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+		if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
+			return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
+		}
+
+		umount := exec.Command(umountPath, temp)
+		if err := umount.Run(); err != nil {
+			return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+		}
 	}
 
 	return nil
