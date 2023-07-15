@@ -209,14 +209,14 @@ func (m *mkfs) Execute() error {
 			}
 		}()
 
-		if err := copyFile(initPath, filepath.Join(initDir, "init")); err != nil {
-			return fmt.Errorf("failed to copy init: %v", err)
-		}
-
 		configDir := filepath.Join(initDir, "thi")
 
 		if err := os.MkdirAll(configDir, 0755); err != nil {
 			return fmt.Errorf("failed to create config dir in init drive: %v", err)
+		}
+
+		if err := copyFile(initPath, filepath.Join(configDir, "init")); err != nil {
+			return fmt.Errorf("failed to copy init: %v", err)
 		}
 
 		if err := os.WriteFile(filepath.Join(configDir, "run.json"), runJson, 0755); err != nil {
