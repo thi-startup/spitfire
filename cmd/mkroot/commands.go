@@ -147,6 +147,8 @@ func useLocalInit(repo string) (initPath string, runConfig []byte, err error) {
 	defer goBack()
 
 	install := exec.Command(goPath, "build", ".")
+	install.Env = append(os.Environ(), "CGO_ENABLED=0")
+
 	if err := install.Run(); err != nil {
 		return "", nil, fmt.Errorf("failed to build thi-startup init: %v", err)
 	}
