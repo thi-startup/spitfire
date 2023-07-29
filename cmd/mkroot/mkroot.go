@@ -29,6 +29,7 @@ Also bundle with a local copy of repository
 	}
 
 	command.Flags().StringP("size", "s", "", "size of the loop device")
+	command.Flags().String("image", "", "name of the container image to unpack into a rootfs")
 	command.Flags().StringP("name", "n", "", "name of the loop device")
 	command.Flags().StringP("fs", "f", "ext4", "filesystem type. eg: ext2, ext4, btrfs, etc)")
 	command.Flags().BoolP("init", "i", false, "create a loop device containing the init of the system. Default behavior is to 'go install github.com/thi-startup/init' and use the resulting binary. Use '--build-from' to specify a local repository of init code (needs go1.19+)")
@@ -66,7 +67,10 @@ Also bundle with a local copy of repository
 			return err
 		}
 
-		return mkroot.Name(name).Size(size).Type(fstype).DirPath(dirpath).MakeInit(init, buildDir).Execute()
+		image, _ := cmd.Flags().GetString("image")
+		fromImage := len(image) != 0
+
+		return mkroot.Name(name).Size(size).Type(fstype).DirPath(dirpath).MakeInit(init, buildDir).Image(fromImage, image).Execute()
 	}
 
 	return command

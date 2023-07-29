@@ -11,6 +11,8 @@ import (
 	"syscall"
 
 	"github.com/docker/docker/daemon/graphdriver/copy"
+	"github.com/google/go-containerregistry/pkg/crane"
+	"github.com/thi-startup/spitfire/internal/unpack"
 )
 
 const (
@@ -27,6 +29,8 @@ type mkfs struct {
 	mountArgs string
 	from      string
 	makeInit  bool
+	fromImage bool
+	image     string
 	initFrom  string
 }
 
@@ -38,6 +42,12 @@ func (m *mkfs) Size(s string) *mkfs {
 func (m *mkfs) MakeInit(p bool, from string) *mkfs {
 	m.makeInit = p
 	m.initFrom = from
+	return m
+}
+
+func (m *mkfs) Image(p bool, image string) *mkfs {
+	m.fromImage = p
+	m.image = image
 	return m
 }
 
@@ -176,6 +186,38 @@ func (m *mkfs) Execute() error {
 	mkfs := exec.Command(m.fscmd, m.name)
 	if err := mkfs.Run(); err != nil {
 		return fmt.Errorf("failed to create filesystem: %v", err)
+	}
+
+	if !m.fromImage {
+		temp, cleanFunc, err := mktemp()
+		if err != nil {
+			return fmt.Errorf("error creating tmp directory: %w", err)
+		}
+
+		defer func() {
+			if err := cleanFunc(); err != nil {
+				log.Fatal("error cleaning up resources: %w", err)
+			}
+		}()
+
+		mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
+		if err := mount.Run(); err != nil {
+			return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+		}
+
+		img, err := crane.Pull(m.image)
+		if err != nil {
+			return fmt.Errorf("error pulling image: %w", err)
+		}
+
+		if err := unpack.Unpack(img, temp); err != nil {
+			return fmt.Errorf("error unpacking image: %w", err)
+		}
+
+		umount := exec.Command(umountPath, temp)
+		if err := umount.Run(); err != nil {
+			return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+		}
 	}
 
 	if m.makeInit {
