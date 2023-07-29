@@ -188,7 +188,7 @@ func (m *mkfs) Execute() error {
 		return fmt.Errorf("failed to create filesystem: %v", err)
 	}
 
-	if !m.fromImage {
+	if m.fromImage {
 		temp, cleanFunc, err := mktemp()
 		if err != nil {
 			return fmt.Errorf("error creating tmp directory: %w", err)
