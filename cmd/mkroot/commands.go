@@ -15,13 +15,6 @@ import (
 	"github.com/thi-startup/spitfire/internal/unpack"
 )
 
-const (
-	mkfsPath      = "/sbin/mkfs"
-	fallocatePath = "/usr/bin/fallocate"
-	mountPath     = "/usr/bin/mount"
-	umountPath    = "/usr/bin/umount"
-)
-
 type mkfs struct {
 	fscmd     string
 	size      string
@@ -32,11 +25,6 @@ type mkfs struct {
 	fromImage bool
 	image     string
 	initFrom  string
-}
-
-func (m *mkfs) Size(s string) *mkfs {
-	m.size = s
-	return m
 }
 
 func (m *mkfs) MakeInit(p bool, from string) *mkfs {
@@ -54,20 +42,6 @@ func (m *mkfs) Image(p bool, image string) *mkfs {
 // specify file to copy from
 func (m *mkfs) DirPath(f string) *mkfs {
 	m.from = f
-	return m
-}
-
-func (m *mkfs) Type(t string) *mkfs {
-	m.fscmd = strings.Join([]string{m.fscmd, t}, ".")
-	return m
-}
-
-func (m *mkfs) MountFlags(s string) *mkfs {
-	return m
-}
-
-func (m *mkfs) Name(name string) *mkfs {
-	m.name = name
 	return m
 }
 
@@ -174,125 +148,141 @@ func useLocalInit(repo string) (initPath string, runConfig []byte, err error) {
 	return
 }
 
-func (m *mkfs) Execute() error {
+func (m *mkfs) createLoopDrive() error {
 	fallocate := exec.Command(fallocatePath, "-l", m.size, m.name)
 	if err := fallocate.Run(); err != nil {
-		return nil
+		return fmt.Errorf("failed to allocate file '%s', %w", m.name, err)
 	}
 
-	if !Exists(m.fscmd) {
-		return fmt.Errorf("could not find '%s'", m.fscmd)
-	}
 	mkfs := exec.Command(m.fscmd, m.name)
 	if err := mkfs.Run(); err != nil {
 		return fmt.Errorf("failed to create filesystem: %v", err)
 	}
+	return nil
+}
+
+func (m *mkfs) createInitDrive() error {
+	var (
+		initPath string
+		runJson  []byte
+		err      error
+	)
+
+	if !Exists(m.initFrom) {
+		if initPath, runJson, err = installInitFromGithub(); err != nil {
+			return err
+		}
+	} else {
+		abs, err := filepath.Abs(m.initFrom)
+		if err != nil {
+			return fmt.Errorf("failed get absolute path of local repo: %v", err)
+		}
+
+		if initPath, runJson, err = useLocalInit(abs); err != nil {
+			return err
+		}
+	}
+
+	initDir, rmInit, err := mktemp()
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err := rmInit(); err != nil {
+			log.Fatalf("failed to remove temp dir: '%s': %v", initDir, err)
+		}
+	}()
+
+	configDir := filepath.Join(initDir, "thi")
+
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config dir in init drive: %v", err)
+	}
+
+	if err := copyFile(initPath, filepath.Join(configDir, "init")); err != nil {
+		return fmt.Errorf("failed to copy init: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, "run.json"), runJson, 0755); err != nil {
+		return fmt.Errorf("failed to create run.json file: %v", err)
+	}
+	m.from = initDir
+
+	temp, rmTemp, err := mktemp()
+	if err != nil {
+		return fmt.Errorf("failed to make temporary directory: %v", err)
+	}
+
+	defer func() {
+		if err := rmTemp(); err != nil {
+			log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
+		}
+	}()
+
+	mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
+	if err := mount.Run(); err != nil {
+		return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+	}
+
+	if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
+		return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
+	}
+
+	umount := exec.Command(umountPath, temp)
+	if err := umount.Run(); err != nil {
+		return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+	}
+	return nil
+}
+
+func (m *mkfs) createDriveFromImage() error {
+	temp, cleanFunc, err := mktemp()
+	if err != nil {
+		return fmt.Errorf("error creating tmp directory: %w", err)
+	}
+
+	defer func() {
+		if err := cleanFunc(); err != nil {
+			log.Fatal("error cleaning up resources: %w", err)
+		}
+	}()
+
+	mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
+	if err := mount.Run(); err != nil {
+		return fmt.Errorf("failed to mount '%s': %v", m.name, err)
+	}
+
+	img, err := crane.Pull(m.image)
+	if err != nil {
+		return fmt.Errorf("error pulling image: %w", err)
+	}
+
+	if err := unpack.Unpack(img, temp); err != nil {
+		return fmt.Errorf("error unpacking image: %w", err)
+	}
+
+	umount := exec.Command(umountPath, temp)
+	if err := umount.Run(); err != nil {
+		return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+	}
+	return nil
+}
+
+func (m *mkfs) Execute() error {
+	if err := m.createLoopDrive(); err != nil {
+		return err
+	}
 
 	if m.fromImage {
-		temp, cleanFunc, err := mktemp()
-		if err != nil {
-			return fmt.Errorf("error creating tmp directory: %w", err)
-		}
-
-		defer func() {
-			if err := cleanFunc(); err != nil {
-				log.Fatal("error cleaning up resources: %w", err)
-			}
-		}()
-
-		mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
-		if err := mount.Run(); err != nil {
-			return fmt.Errorf("failed to mount '%s': %v", m.name, err)
-		}
-
-		img, err := crane.Pull(m.image)
-		if err != nil {
-			return fmt.Errorf("error pulling image: %w", err)
-		}
-
-		if err := unpack.Unpack(img, temp); err != nil {
-			return fmt.Errorf("error unpacking image: %w", err)
-		}
-
-		umount := exec.Command(umountPath, temp)
-		if err := umount.Run(); err != nil {
-			return fmt.Errorf("failed to unmount '%s': %v", temp, err)
+		if err := m.createDriveFromImage(); err != nil {
+			return fmt.Errorf("failed to create drive from image '%s': %w", m.image, err)
 		}
 	}
 
 	if m.makeInit {
-		var (
-			initPath string
-			runJson  []byte
-			err      error
-		)
-
-		if !Exists(m.initFrom) {
-			if initPath, runJson, err = installInitFromGithub(); err != nil {
-				return err
-			}
-		} else {
-			abs, err := filepath.Abs(m.initFrom)
-			if err != nil {
-				return fmt.Errorf("failed get absolute path of local repo: %v", err)
-			}
-
-			if initPath, runJson, err = useLocalInit(abs); err != nil {
-				return err
-			}
-		}
-
-		initDir, rmDir, err := mktemp()
-		if err != nil {
+		if err := m.createInitDrive(); err != nil {
 			return err
-		}
-
-		defer func() {
-			if err := rmDir(); err != nil {
-				log.Fatalf("failed to remove temp dir: '%s': %v", initDir, err)
-			}
-		}()
-
-		configDir := filepath.Join(initDir, "thi")
-
-		if err := os.MkdirAll(configDir, 0755); err != nil {
-			return fmt.Errorf("failed to create config dir in init drive: %v", err)
-		}
-
-		if err := copyFile(initPath, filepath.Join(configDir, "init")); err != nil {
-			return fmt.Errorf("failed to copy init: %v", err)
-		}
-
-		if err := os.WriteFile(filepath.Join(configDir, "run.json"), runJson, 0755); err != nil {
-			return fmt.Errorf("failed to create run.json file: %v", err)
-		}
-		m.from = initDir
-	}
-
-	if m.makeInit || Exists(m.from) {
-		temp, rmDir, err := mktemp()
-		if err != nil {
-			return fmt.Errorf("failed to make temporary directory: %v", err)
-		}
-
-		defer func() {
-			if err := rmDir(); err != nil {
-				log.Fatalf("failed to remove temp dir: '%s': %v", temp, err)
-			}
-		}()
-
-		mount := exec.Command(mountPath, "-o", m.mountArgs, m.name, temp)
-		if err := mount.Run(); err != nil {
-			return fmt.Errorf("failed to mount '%s': %v", m.name, err)
-		}
-
-		if err := copy.DirCopy(m.from, temp, copy.Content, true); err != nil {
-			return fmt.Errorf("failed to copy from '%s' to '%s': %v", m.from, temp, err)
-		}
-
-		umount := exec.Command(umountPath, temp)
-		if err := umount.Run(); err != nil {
-			return fmt.Errorf("failed to unmount '%s': %v", temp, err)
 		}
 	}
 
@@ -340,15 +330,51 @@ func Exists(file string) bool {
 	return true
 }
 
-func Mkfs() (*mkfs, error) {
-	if !Exists(fallocatePath) {
-		return nil, fmt.Errorf("could not find '%s'", fallocatePath)
+var (
+	mkfsPath      = "/sbin/mkfs"
+	mountPath     = "/usr/bin/mount"
+	fallocatePath = "/usr/bin/fallocate"
+	umountPath    = "/usr/bin/umount"
+)
+
+func findExecutable(exe string) (string, error) {
+	if Exists(exe) {
+		return exe, nil
 	}
-	if !Exists(mountPath) {
-		return nil, fmt.Errorf("could not find '%s'", mountPath)
+	_, file := filepath.Split(exe)
+	exePath, err := exec.LookPath(file)
+	if err != nil {
+		return "", fmt.Errorf("%s not found: %w", file, err)
 	}
+	return exePath, nil
+}
+
+func Mkfs(name, size, fstype string) (*mkfs, error) {
+	var err error
+
+	if mkfsPath, err = findExecutable(mkfsPath); err != nil {
+		return nil, err
+	}
+
+	if fallocatePath, err = findExecutable(fallocatePath); err != nil {
+		return nil, err
+	}
+
+	if name == "" {
+		return nil, fmt.Errorf("drive name cannot be empty")
+	} else if Exists(name) {
+		return nil, fmt.Errorf("drive with name '%s' already exists", name)
+	}
+
+	fscmd, err := findExecutable(strings.Join([]string{mkfsPath, fstype}, "."))
+	if err != nil {
+		return nil, fmt.Errorf("could not find %s: %w", fscmd, err)
+	}
+
 	return &mkfs{
-		fscmd:     mkfsPath,
+		name:      name,
+		size:      size,
+		fscmd:     fscmd,
 		mountArgs: "loop,noatime",
 	}, nil
 }
