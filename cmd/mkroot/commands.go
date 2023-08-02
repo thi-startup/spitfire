@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/daemon/graphdriver/copy"
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/thi-startup/spitfire/internal/unpack"
+	"github.com/thi-startup/spitfire/utils"
 )
 
 type mkfs struct {
@@ -64,7 +65,7 @@ func mktemp() (string, func() error, error) {
 func getGoPath() (string, error) {
 	path, err := exec.LookPath("go")
 
-	if err != nil && !Exists("/usr/local/go/bin/go") {
+	if err != nil && !utils.Exists("/usr/local/go/bin/go") {
 		return "", fmt.Errorf("failed to get go path: %v", err)
 	} else if path == "" {
 		return "/usr/local/go/bin/go", nil
@@ -87,7 +88,7 @@ func installInitFromGithub() (initPath string, runConfig []byte, err error) {
 	}
 
 	initPath = filepath.Join(os.Getenv("HOME"), "go", "bin", "init")
-	if !Exists(initPath) {
+	if !utils.Exists(initPath) {
 		return "", nil, fmt.Errorf("failed to install thi-startup init")
 	}
 
@@ -168,7 +169,7 @@ func (m *mkfs) createInitDrive() error {
 		err      error
 	)
 
-	if !Exists(m.initFrom) {
+	if !utils.Exists(m.initFrom) {
 		if initPath, runJson, err = installInitFromGithub(); err != nil {
 			return err
 		}
@@ -323,13 +324,6 @@ func copyFile(src, dest string) error {
 	return nil
 }
 
-func Exists(file string) bool {
-	if _, err := os.Stat(file); os.IsNotExist(err) {
-		return false
-	}
-	return true
-}
-
 var (
 	mkfsPath      = "/sbin/mkfs"
 	mountPath     = "/usr/bin/mount"
@@ -338,7 +332,7 @@ var (
 )
 
 func findExecutable(exe string) (string, error) {
-	if Exists(exe) {
+	if utils.Exists(exe) {
 		return exe, nil
 	}
 	_, file := filepath.Split(exe)
@@ -362,7 +356,7 @@ func Mkfs(name, size, fstype string) (*mkfs, error) {
 
 	if name == "" {
 		return nil, fmt.Errorf("drive name cannot be empty")
-	} else if Exists(name) {
+	} else if utils.Exists(name) {
 		return nil, fmt.Errorf("drive with name '%s' already exists", name)
 	}
 
