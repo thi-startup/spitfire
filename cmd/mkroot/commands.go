@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/daemon/graphdriver/copy"
 	"github.com/google/go-containerregistry/pkg/crane"
+	"github.com/google/go-containerregistry/pkg/v1/cache"
 	"github.com/thi-startup/spitfire/internal/unpack"
 	"github.com/thi-startup/spitfire/utils"
 )
@@ -259,7 +260,14 @@ func (m *mkfs) createDriveFromImage() error {
 		return fmt.Errorf("error pulling image: %w", err)
 	}
 
-	if err := unpack.Unpack(img, temp); err != nil {
+	cacheDir, err := utils.ImageCache()
+	if err != nil {
+		return fmt.Errorf("error getting cache directory: %w", err)
+	}
+
+	cachedImage := cache.Image(img, cache.NewFilesystemCache(cacheDir))
+
+	if err := unpack.Unpack(cachedImage, temp); err != nil {
 		return fmt.Errorf("error unpacking image: %w", err)
 	}
 
