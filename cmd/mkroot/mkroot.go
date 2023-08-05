@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -51,18 +50,16 @@ Also bundle with a local copy of repository
 
 		fstype, _ := cmd.Flags().GetString("fs")
 
-		from, _ := cmd.Flags().GetString("cp")
-		dirpath, err := filepath.Abs(from)
-		if from != "" && err != nil {
-			return fmt.Errorf("failed to get absolute path of '%s': %v", from, err)
-		} else if !Exists(dirpath) {
-			return fmt.Errorf("specify valid directory to copy root device files from")
-		}
+		dirpath, _ := cmd.Flags().GetString("cp")
 
 		init, _ := cmd.Flags().GetBool("init")
 		buildDir, _ := cmd.Flags().GetString("build-from")
+		if !init && buildDir != "" {
+			cmd.Help()
+			return fmt.Errorf("can't make init drive without the --init option")
+		}
 
-		mkroot, err := Mkfs()
+		mkroot, err := Mkfs(name, size, fstype)
 		if err != nil {
 			return err
 		}
@@ -70,7 +67,7 @@ Also bundle with a local copy of repository
 		image, _ := cmd.Flags().GetString("image")
 		fromImage := len(image) != 0
 
-		return mkroot.Name(name).Size(size).Type(fstype).DirPath(dirpath).MakeInit(init, buildDir).Image(fromImage, image).Execute()
+		return mkroot.DirPath(dirpath).MakeInit(init, buildDir).Image(fromImage, image).Execute()
 	}
 
 	return command

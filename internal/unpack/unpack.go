@@ -2,22 +2,16 @@ package unpack
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/moby/moby/pkg/archive"
-)
-
-const (
-	tmpdir = "/tmp/spitfire"
+	"github.com/thi-startup/spitfire/utils"
 )
 
 func Unpack(image v1.Image, dest string) error {
-	if _, err := os.Stat(dest); err != nil && os.IsNotExist(err) {
-		if err := os.MkdirAll(dest, os.ModePerm); err != nil {
-			return fmt.Errorf("error creating destdir: %w", err)
-		}
+	if _, err := utils.CreateNotExist(dest); err != nil {
+		return fmt.Errorf("error creating destdir: %w", err)
 	}
 
 	layers, err := image.Layers()
