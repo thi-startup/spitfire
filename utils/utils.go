@@ -6,6 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
+
+	"github.com/k0kubun/go-ansi"
+	"github.com/schollz/progressbar/v3"
 )
 
 func Exists(file string) bool {
@@ -112,4 +116,37 @@ func SymlinkVmlinux(dest string) error {
 	}
 
 	return nil
+}
+
+func NewProgressBar(maxBytes int64, description ...string) *progressbar.ProgressBar {
+	desc := ""
+	if len(description) > 0 {
+		desc = description[0]
+	}
+
+	writer := ansi.NewAnsiStdout()
+	return progressbar.NewOptions64(
+		maxBytes,
+		progressbar.OptionSetDescription(desc),
+		progressbar.OptionSetWriter(writer),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetWidth(50),
+		progressbar.OptionThrottle(100*time.Millisecond),
+		progressbar.OptionSetPredictTime(false),
+		progressbar.OptionClearOnFinish(),
+		progressbar.OptionSpinnerType(14),
+		progressbar.OptionSetRenderBlankState(true),
+		progressbar.OptionSetTheme(progressbar.Theme{
+			Saucer:        "=",
+			SaucerHead:    ">",
+			SaucerPadding: " ",
+			BarStart:      "[",
+			BarEnd:        "]",
+		}),
+	)
+}
+
+func NewProgressReader(reader io.Reader, bar *progressbar.ProgressBar) progressbar.Reader {
+	return progressbar.NewReader(reader, bar)
 }

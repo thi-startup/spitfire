@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v53/github"
+	"github.com/thi-startup/spitfire/utils"
 )
 
 type Github struct {
@@ -79,7 +80,9 @@ func (g Github) DownloadAssetByTag(ctx context.Context, dest string) error {
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, rc)
+	bar := utils.NewProgressBar(int64(asset.GetSize()))
+
+	_, err = io.Copy(io.MultiWriter(file, bar), rc)
 	if err != nil {
 		return err
 	}
