@@ -12,3 +12,6 @@ linker_flags = '-s -X main.buildTime=${current_time} -X main.hash=${git_descript
 build:
 	@echo 'Building cmd/api...'
 	go build -ldflags=${linker_flags} -o=./bin/spitfire .
+
+test:
+	@go test $(shell go list ./...) -cover

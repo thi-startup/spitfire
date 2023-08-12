@@ -1,4 +1,4 @@
-package unpack
+package get
 
 import (
 	"fmt"
@@ -9,6 +9,7 @@ import (
 	"github.com/thi-startup/spitfire/utils"
 )
 
+// Unpack extracts the image layers into a target directory
 func Unpack(image v1.Image, dest string) error {
 	if _, err := utils.CreateNotExist(dest); err != nil {
 		return fmt.Errorf("error creating destdir: %w", err)

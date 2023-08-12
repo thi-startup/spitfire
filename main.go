@@ -4,9 +4,15 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charmbracelet/log"
 	"github.com/spf13/cobra"
-	cmd "github.com/thi-startup/spitfire/cmd/mkroot"
+	"github.com/thi-startup/spitfire/cmd"
 )
+
+func init() {
+	log.SetOutput(os.Stderr)
+	log.SetLevel(log.DebugLevel)
+}
 
 var (
 	version   string
@@ -25,7 +31,9 @@ func main() {
 
 	rootCmd.SetVersionTemplate(`{{printf "%s" .Version}}`)
 
-	rootCmd.AddCommand(cmd.Mkroot())
+	rootCmd.AddCommand(cmd.MakeCreateCmd())
+	rootCmd.AddCommand(cmd.MakeInitCmd())
+	rootCmd.AddCommand(cmd.MkRunCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
