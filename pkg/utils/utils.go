@@ -1,8 +1,11 @@
 package utils
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/thi-startup/spitfire/internal/config"
 )
 
 func Exists(file string) bool {
@@ -35,4 +38,21 @@ func ImageCache() (string, error) {
 		return "", nil
 	}
 	return CreateNotExist(filepath.Join(home, "images"))
+}
+
+func VerifyBinary(path string) error {
+	finfo, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("binary %q does not exist", path)
+	}
+	if err != nil {
+		return fmt.Errorf("stat binary %q: %w", path, err)
+	}
+	if finfo.IsDir() {
+		return fmt.Errorf("binary %q is a directory", path)
+	}
+	if finfo.Mode()&config.ExecutableMask == 0 {
+		return fmt.Errorf("binary %q is not executable", path)
+	}
+	return nil
 }

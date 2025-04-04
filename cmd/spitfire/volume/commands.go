@@ -1,4 +1,4 @@
-package cmd
+package volume
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/crane"
 	"github.com/google/go-containerregistry/pkg/v1/cache"
 	"github.com/thi-startup/spitfire/internal/unpack"
-	"github.com/thi-startup/spitfire/utils"
+	"github.com/thi-startup/spitfire/pkg/utils"
 )
 
 type mkfs struct {

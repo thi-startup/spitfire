@@ -1,0 +1,6 @@
+version: '1'
+
+vms:
+  webserver:
+    kernel: <path_to_kernel>
+

@@ -6,7 +6,7 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/moby/moby/pkg/archive"
-	"github.com/thi-startup/spitfire/utils"
+	"github.com/thi-startup/spitfire/pkg/utils"
 )
 
 func Unpack(image v1.Image, dest string) error {

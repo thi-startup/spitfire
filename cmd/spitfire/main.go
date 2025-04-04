@@ -5,7 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	cmd "github.com/thi-startup/spitfire/cmd/mkroot"
+	"github.com/thi-startup/spitfire/cmd/spitfire/vmctl"
+	"github.com/thi-startup/spitfire/cmd/spitfire/volume"
 )
 
 var (
@@ -15,7 +16,7 @@ var (
 )
 
 func main() {
-	rootCmd := &cobra.Command{
+	root := &cobra.Command{
 		Use:     "spitfire",
 		Version: fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, hash, buildTime),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -23,11 +24,11 @@ func main() {
 		},
 	}
 
-	rootCmd.SetVersionTemplate(`{{printf "%s" .Version}}`)
+	root.SetVersionTemplate(`{{printf "%s" .Version}}`)
 
-	rootCmd.AddCommand(cmd.Mkroot())
+	root.AddCommand(volume.Root(), vmctl.Root())
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
