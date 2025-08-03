@@ -1,0 +1,7 @@
+version: "1"
+
+vms:
+  app:
+    image: "alpine:latest"
+    networks:
+      - undefined-network

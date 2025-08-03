@@ -1,0 +1,73 @@
+version: "1"
+driver: "firecracker"
+
+globals:
+  kernel: "/opt/firecracker/vmlinux"
+  resources:
+    vcpu: 1
+    memory: "512MB"
+  networks:
+    - app-network
+
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.20.0.0/16"
+
+volumes:
+  postgres-data:
+    driver: local
+    size: "5GB"
+    persist: true
+  redis-data:
+    driver: local
+    size: "1GB"
+
+vms:
+  web:
+    image: "nginx:alpine"
+    resources:
+      memory: "256MB"
+    volumes:
+      - type: bind
+        source: "./nginx.conf"
+        target: "/etc/nginx/nginx.conf"
+    depends_on:
+      - api
+    env:
+      UPSTREAM_HOST: "api"
+
+  api:
+    image: "myapp:latest"
+    resources:
+      vcpu: 2
+      memory: "1GB"
+    depends_on:
+      - database
+      - cache
+    env:
+      DATABASE_URL: "postgres://user:pass@database:5432/app"
+      REDIS_URL: "redis://cache:6379"
+      PORT: "8080"
+
+  database:
+    image: "postgres:13-alpine"
+    resources:
+      memory: "1GB"
+    volumes:
+      - source: postgres-data
+        target: /var/lib/postgresql/data
+    env:
+      POSTGRES_DB: "app"
+      POSTGRES_USER: "user"
+      POSTGRES_PASSWORD: "password"
+
+  cache:
+    image: "redis:alpine"
+    resources:
+      memory: "128MB"
+    volumes:
+      - source: redis-data
+        target: /data

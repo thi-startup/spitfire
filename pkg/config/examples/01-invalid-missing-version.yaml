@@ -1,0 +1,3 @@
+vms:
+  app:
+    image: "alpine:latest"
