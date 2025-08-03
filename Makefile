@@ -8,14 +8,39 @@ GO_CMD = CGO_ENABLED=0 go build
 BIN_DIR = ./bin
 TMP_DIR = ./tmp
 APPS_DIR = ./cmd
+APP ?= spitfire
+MAIN = $(addprefix cmd/, $(APP))
+BIN = $(addprefix bin/, $(APP))
 
-all: spitfire init
+# all: spitfire init clean test lint
+.PHONY: clean test lint
+.DEFAULT_GOAL := $(BIN)
 
 $(BIN_DIR) $(TMP_DIR):
 	mkdir -p $@
 
-spitfire:
-	$(GO_CMD) $(GOFLAGS) -o $(BIN_DIR)/$@ $(APPS_DIR)/$@
+$(BIN): $(wildcard $(MAIN)/*.go)
+	$(GO_CMD) $(GOFLAGS) -o $@ ./$(MAIN)
 
-init:
-	$(GO_CMD) $(GOFLAGS) -o $(BIN_DIR)/spitfire-$@ $(APPS_DIR)/$@
+# $(BIN_DIR)/spitfire:
+# 	$(GO_CMD) $(GOFLAGS) -o $(BIN_DIR)/$@ $(APPS_DIR)/$@
+
+clean:
+	rm -rf $(BIN)
+
+test:
+	go test -v ./...
+
+# Basic linting
+lint:
+	go vet ./...
+	go fmt ./...
+
+deps:
+	go mod download
+	go mod tidy
+
+info:
+	@echo "Version: $(VERSION)"
+	@echo "Commit: $(COMMIT_HASH)"
+	@echo "Build Time: $(BUILD_TIME)"

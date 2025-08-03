@@ -5,20 +5,24 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/thi-startup/spitfire/cmd/spitfire/vmctl"
-	"github.com/thi-startup/spitfire/cmd/spitfire/volume"
+	"github.com/thi-startup/spitfire/pkg/log"
 )
 
 var (
-	version   string
-	hash      string
-	buildTime string
+	version    string
+	commitHash string
+	buildTime  string
 )
 
 func main() {
 	root := &cobra.Command{
 		Use:     "spitfire",
-		Version: fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, hash, buildTime),
+		Short:   "Manage Firecracker microVMs with a Docker Compose-like experience",
+		Version: fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, commitHash, buildTime),
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Initialize logging based on flags
+			initializeLogging(cmd)
+		},
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
@@ -26,9 +30,57 @@ func main() {
 
 	root.SetVersionTemplate(`{{printf "%s" .Version}}`)
 
-	root.AddCommand(volume.Root(), vmctl.Root())
+	// Add global logging flags
+	root.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
+	root.PersistentFlags().Bool("debug", false, "Enable debug output")
+	root.PersistentFlags().BoolP("quiet", "q", false, "Suppress non-error output")
+	root.PersistentFlags().String("log-level", "", "Set log level (trace|debug|info|warn|error)")
+	root.PersistentFlags().String("log-file", "", "Write logs to file instead of stderr")
+
+	// Add command groups
+	root.AddCommand(
+		newVMCommands(),
+		newVolumeCommands(),
+		newConfigCommands(),
+		newSetupCommand(),
+	)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
+	}
+}
+
+// initializeLogging sets up the global logger based on command flags
+func initializeLogging(cmd *cobra.Command) {
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	debug, _ := cmd.Flags().GetBool("debug")
+	quiet, _ := cmd.Flags().GetBool("quiet")
+	logLevel, _ := cmd.Flags().GetString("log-level")
+	logFile, _ := cmd.Flags().GetString("log-file")
+
+	config := log.Config{
+		Verbose: verbose,
+		Debug:   debug,
+		Quiet:   quiet,
+		LogFile: logFile,
+		Format:  "text", // Default to text format for CLI
+	}
+
+	// Parse explicit log level if provided
+	if logLevel != "" {
+		config.Level = log.ParseLogLevel(logLevel)
+	}
+
+	log.InitializeGlobalLogger(config)
+}
+
+// newSetupCommand creates the setup command (privileged operations)
+func newSetupCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup",
+		Short: "Initial system setup (requires sudo)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return fmt.Errorf("not implemented yet")
+		},
 	}
 }

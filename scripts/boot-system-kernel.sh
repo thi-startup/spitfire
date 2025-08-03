@@ -1,6 +1,6 @@
 #!/bin/sh
 
-KERNEL_PATH="/boot/vmlinuz-linux"
+KERNEL_PATH="${KERNEL_PATH:-/boot/vmlinuz-linux}"
 INITRD_PATH="/boot/initrd.img-$(uname -r)"
 
 qemu-system-x86_64 \
