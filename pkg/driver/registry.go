@@ -85,8 +85,6 @@ func (r *driverRegistry) Register(def DriverDef) error {
 	}
 
 	r.drivers[def.Name] = def
-
-	// Register aliases
 	for _, alias := range def.Aliases {
 		if _, exists := r.driversByAlias[alias]; exists {
 			return fmt.Errorf("alias %q is already registered", alias)
@@ -106,7 +104,6 @@ func (r *driverRegistry) Driver(name string) DriverDef {
 		return def
 	}
 
-	// Check aliases
 	if def, exists := r.driversByAlias[name]; exists {
 		return def
 	}

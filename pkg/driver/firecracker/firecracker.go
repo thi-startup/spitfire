@@ -472,3 +472,21 @@ func (d *Driver) SupportedFeatures() []driver.Feature {
 		// driver.FeatureGPU,
 	}
 }
+
+// Setup implements driver.Driver for Firecracker-specific host setup
+func (d *Driver) Setup(ctx context.Context, opts *driver.SetupOptions) (*driver.SetupResult, error) {
+	// TODO: Implement Firecracker-specific setup
+	return nil, fmt.Errorf("Setup not yet implemented for Firecracker driver")
+}
+
+// VerifySetup implements driver.Driver for Firecracker setup verification
+func (d *Driver) VerifySetup(ctx context.Context) (*driver.SetupStatus, error) {
+	// TODO: Implement Firecracker-specific setup verification
+	return nil, fmt.Errorf("VerifySetup not yet implemented for Firecracker driver")
+}
+
+// GetSetupInstructions implements driver.Driver for Firecracker setup instructions
+func (d *Driver) GetSetupInstructions(ctx context.Context) (*driver.SetupInstructions, error) {
+	// TODO: Implement Firecracker-specific setup instructions
+	return nil, fmt.Errorf("GetSetupInstructions not yet implemented for Firecracker driver")
+}

@@ -160,6 +160,73 @@ func (d *Driver) SupportedFeatures() []driver.Feature {
 	}
 }
 
+// Setup simulates driver setup for testing
+func (d *Driver) Setup(ctx context.Context, opts *driver.SetupOptions) (*driver.SetupResult, error) {
+	actions := []driver.SetupAction{
+		{
+			Component:   "mock-component",
+			Description: "Mock setup action for testing",
+			Command:     "echo 'mock setup'",
+			Success:     true,
+		},
+	}
+
+	if opts.DryRun {
+		return &driver.SetupResult{
+			Success:   true,
+			Actions:   actions,
+			NextSteps: []string{"This is a mock driver - no real setup needed"},
+		}, nil
+	}
+
+	return &driver.SetupResult{
+		Success: true,
+		Actions: actions,
+	}, nil
+}
+
+// VerifySetup simulates setup verification for testing
+func (d *Driver) VerifySetup(ctx context.Context) (*driver.SetupStatus, error) {
+	return &driver.SetupStatus{
+		Ready: true,
+		Components: []driver.ComponentStatus{
+			{
+				Name:        "mock-component",
+				Ready:       true,
+				Description: "Mock component for testing",
+				Status:      "Ready",
+				Required:    true,
+			},
+		},
+		Summary: "Mock driver is ready for testing",
+	}, nil
+}
+
+// GetSetupInstructions returns mock setup instructions for testing
+func (d *Driver) GetSetupInstructions(ctx context.Context) (*driver.SetupInstructions, error) {
+	return &driver.SetupInstructions{
+		Overview: "This is a mock driver for testing purposes",
+		Prerequisites: []string{
+			"No prerequisites needed for mock driver",
+		},
+		AutomatedSteps: []driver.SetupStep{
+			{
+				Name:        "mock-setup",
+				Description: "Simulated setup step",
+				Commands:    []string{"echo 'mock setup complete'"},
+				Required:    true,
+			},
+		},
+		Documentation: []driver.DocLink{
+			{
+				Title:       "Mock Driver Documentation",
+				URL:         "https://example.com/mock-driver",
+				Description: "Documentation for the mock driver",
+			},
+		},
+	}, nil
+}
+
 // Register registers the mock driver
 func Register() error {
 	return driver.Register(driver.DriverDef{
@@ -171,6 +238,14 @@ func Register() error {
 		Default:     false,
 		Description: "Mock driver for testing",
 	})
+}
+
+// init automatically registers the mock driver
+func init() {
+	if err := Register(); err != nil {
+		// Don't panic for mock driver - just print error
+		fmt.Printf("Warning: failed to register mock driver: %v\n", err)
+	}
 }
 
 // status returns the mock driver status

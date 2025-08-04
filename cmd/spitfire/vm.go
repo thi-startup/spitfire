@@ -51,7 +51,7 @@ func newVMCommands() *cobra.Command {
 		},
 	}
 	downCmd.Flags().StringP("file", "f", "", "Specify an alternate spitfire config file (default: spitfire.yaml)")
-	downCmd.Flags().BoolP("volumes", "v", false, "Remove named volumes declared in the volumes section")
+	downCmd.Flags().BoolP("volumes", "", false, "Remove named volumes declared in the volumes section")
 
 	// VM ps command
 	psCmd := &cobra.Command{
@@ -142,7 +142,7 @@ func runVMPs(showAll bool, quiet bool, outputFormat string) error {
 		if currentIP == "" {
 			currentIP = "-"
 		}
-		
+
 		createdStr := vmRuntime.CreatedAt.Format("2006-01-02 15:04:05")
 		memory := fmt.Sprintf("%dMB", vmRuntime.DriverConfig.Memory)
 		cpus := fmt.Sprintf("%d", vmRuntime.DriverConfig.CPUs)
@@ -160,7 +160,7 @@ func runVMPs(showAll bool, quiet bool, outputFormat string) error {
 
 	// Handle output based on mode
 	printer := output.NewPrinter(format, nil)
-	
+
 	if quiet {
 		output.PrintQuiet(vmNames, nil)
 		return nil
@@ -173,7 +173,6 @@ func runVMPs(showAll bool, quiet bool, outputFormat string) error {
 
 // runVMUp implements the vm up command
 func runVMUp(configFile string, detach bool) error {
-	// Find and load config file
 	configFile, err := findConfigFile(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to find config file: %w", err)
@@ -185,13 +184,10 @@ func runVMUp(configFile string, detach bool) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Get current working directory for state management
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
-
-	// Initialize state manager
 	projectName := filepath.Base(cwd)
 	stateManager := state.NewManager(projectName)
 

@@ -6,6 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/thi-startup/spitfire/pkg/log"
+
+	// Import drivers to trigger their init() functions
+	_ "github.com/thi-startup/spitfire/pkg/driver/firecracker"
+	_ "github.com/thi-startup/spitfire/pkg/driver/mock"
 )
 
 var (
@@ -16,28 +20,21 @@ var (
 
 func main() {
 	root := &cobra.Command{
-		Use:     "spitfire",
-		Short:   "Manage Firecracker microVMs with a Docker Compose-like experience",
-		Version: fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, commitHash, buildTime),
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Initialize logging based on flags
-			initializeLogging(cmd)
-		},
+		Use:              "spitfire",
+		Short:            "Manage Firecracker microVMs with a Docker Compose-like experience",
+		Version:          fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, commitHash, buildTime),
+		PersistentPreRun: func(cmd *cobra.Command, args []string) { initializeLogging(cmd) },
 		Run: func(cmd *cobra.Command, args []string) {
 			cmd.Help()
 		},
 	}
 
 	root.SetVersionTemplate(`{{printf "%s" .Version}}`)
-
-	// Add global logging flags
 	root.PersistentFlags().BoolP("verbose", "v", false, "Enable verbose output")
 	root.PersistentFlags().Bool("debug", false, "Enable debug output")
 	root.PersistentFlags().BoolP("quiet", "q", false, "Suppress non-error output")
 	root.PersistentFlags().String("log-level", "", "Set log level (trace|debug|info|warn|error)")
 	root.PersistentFlags().String("log-file", "", "Write logs to file instead of stderr")
-
-	// Add command groups
 	root.AddCommand(
 		newVMCommands(),
 		newVolumeCommands(),
@@ -72,15 +69,4 @@ func initializeLogging(cmd *cobra.Command) {
 	}
 
 	log.InitializeGlobalLogger(config)
-}
-
-// newSetupCommand creates the setup command (privileged operations)
-func newSetupCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "setup",
-		Short: "Initial system setup (requires sudo)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return fmt.Errorf("not implemented yet")
-		},
-	}
 }
