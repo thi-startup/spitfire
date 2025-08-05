@@ -40,6 +40,7 @@ func main() {
 		newVolumeCommands(),
 		newConfigCommands(),
 		newSetupCommand(),
+		newDriverCmd(), // Register new driver command
 	)
 
 	if err := root.Execute(); err != nil {
