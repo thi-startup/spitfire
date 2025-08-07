@@ -29,7 +29,7 @@ func convertVMToDriverConfig(vmName string, vm *config.VM, cfg *config.Config) (
 	}
 
 	// Log debug information
-	log.Debugf("Converting VM config: image=%s, rootfs=%s, memory=%dMB, cpus=%d", 
+	log.Debugf("Converting VM config: image=%s, rootfs=%s, memory=%dMB, cpus=%d",
 		driverConfig.Image, driverConfig.Rootfs, driverConfig.Memory, driverConfig.CPUs)
 
 	return driverConfig, nil

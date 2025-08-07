@@ -49,13 +49,134 @@ Seamless integration with spitfire's configuration system:
 
 ### Current Status
 
-| Driver | Status | Priority | Platform | Use Case |
-|--------|--------|----------|----------|----------|
-| Firecracker | Planned | HighlyPreferred | Linux | Production, Security |
-| QEMU | Planned | Preferred | Linux/macOS | Development, Flexibility |
-| VirtualBox | Future | Default | Cross-platform | Compatibility |
-| VMware | Future | Preferred | Cross-platform | Enterprise |
-| Hyper-V | Future | Default | Windows | Windows Integration |
+| Driver | Status | Priority | Description |
+|--------|--------|----------|-------------|
+| **Firecracker** | ✅ Production Ready | HighlyPreferred | AWS Firecracker microVM driver with comprehensive setup automation |
+| **Mock** | ✅ Available | Default | Testing and development driver |
+| QEMU | 📋 Planned | Default | Full system virtualization with KVM acceleration |
+| VirtualBox | 📋 Planned | Fallback | Cross-platform virtualization for development |
+| Docker | 📋 Planned | Default | Container-based lightweight virtualization |
+
+## Driver Management Commands
+
+Spitfire provides comprehensive driver management through the `spitfire driver` command:
+
+### Listing Drivers
+```bash
+# List all available drivers with status
+spitfire driver ls
+
+# Output in JSON format
+spitfire driver ls -o json
+```
+
+### Driver Information
+```bash
+# Show detailed information about a specific driver
+spitfire driver info firecracker
+```
+
+### Driver Setup
+```bash
+# Run automated setup for a driver
+spitfire driver setup firecracker
+
+# Dry-run to see what would be done
+spitfire driver setup firecracker --dry-run
+
+# Interactive setup with prompts
+spitfire driver setup firecracker --interactive
+
+# Force setup without confirmations
+spitfire driver setup firecracker --force
+```
+
+### Setup Verification
+```bash
+# Verify driver setup status
+spitfire driver verify firecracker
+
+# JSON output for programmatic use
+spitfire driver verify firecracker -o json
+```
+
+### Setup Instructions
+```bash
+# Show comprehensive setup instructions
+spitfire driver instructions firecracker
+```
+
+## Driver Setup System
+
+Each driver implements a comprehensive setup system to configure host prerequisites:
+
+### Setup Operations
+1. **Automated Setup**: `Setup()` method configures host system automatically
+2. **Setup Verification**: `VerifySetup()` checks current configuration status
+3. **Setup Instructions**: `GetSetupInstructions()` provides comprehensive guidance
+
+### Setup Features
+- **Dry-run Mode**: Test setup without making changes
+- **Component-based Setup**: Configure specific components (networking, permissions, etc.)
+- **Interactive Mode**: User prompts for configuration decisions
+- **Comprehensive Verification**: Component-by-component status reporting
+- **Issue Resolution**: Specific commands and steps to fix problems
+
+### Example: Firecracker Setup
+The Firecracker driver setup includes:
+- KVM permissions and device access configuration
+- Network bridge creation and IP configuration
+- iptables firewall rules for VM networking
+- Required directory structure creation
+- IP forwarding enablement
+- User group membership management
+
+## VM Lifecycle Management
+
+VMs are managed through the `spitfire vm` command, which integrates seamlessly with the driver system:
+
+### Creating and Starting VMs
+```bash
+# Start all VMs defined in spitfire.yaml
+spitfire vm up
+
+# Use specific config file
+spitfire vm up -f custom-spitfire.yaml
+
+# Run in background (detached mode)
+spitfire vm up --detach
+```
+
+### Viewing Running VMs
+```bash
+# List running VMs
+spitfire vm ps
+
+# Show all VMs (including stopped)
+spitfire vm ps --all
+
+# Quiet mode (just VM names)
+spitfire vm ps --quiet
+
+# JSON output
+spitfire vm ps -o json
+```
+
+### Stopping VMs
+```bash
+# Stop all VMs in the current project
+spitfire vm down
+
+# Also remove volumes
+spitfire vm down --volumes
+```
+
+### VM Configuration Integration
+VMs are defined in `spitfire.yaml` files and the driver system automatically:
+- Selects appropriate drivers based on configuration
+- Converts VM configurations to driver-specific formats
+- Manages VM state persistence across restarts
+- Handles driver-specific optimization and features
 
 ### Driver Priorities
 

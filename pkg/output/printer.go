@@ -64,19 +64,19 @@ func (p *Printer) renderTable(headers []string, rows [][]string) error {
 	}
 
 	table := tablewriter.NewWriter(p.writer)
-	
+
 	// Convert headers to []any for tablewriter API
 	headerArgs := make([]any, len(headers))
 	for i, h := range headers {
 		headerArgs[i] = h
 	}
 	table.Header(headerArgs...)
-	
+
 	// Add rows using Bulk method
 	if err := table.Bulk(rows); err != nil {
 		return fmt.Errorf("failed to add table data: %w", err)
 	}
-	
+
 	// Render the table
 	if err := table.Render(); err != nil {
 		return fmt.Errorf("failed to render table: %w", err)
@@ -89,7 +89,7 @@ func (p *Printer) renderTable(headers []string, rows [][]string) error {
 func (p *Printer) renderTableAsJSON(headers []string, rows [][]string) error {
 	// Convert table data to array of objects
 	var objects []map[string]string
-	
+
 	for _, row := range rows {
 		obj := make(map[string]string)
 		for i, cell := range row {
@@ -99,7 +99,7 @@ func (p *Printer) renderTableAsJSON(headers []string, rows [][]string) error {
 		}
 		objects = append(objects, obj)
 	}
-	
+
 	return p.PrintJSON(objects)
 }
 

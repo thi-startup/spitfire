@@ -34,6 +34,11 @@ type Driver interface {
     DeleteVolume(ctx context.Context, volumeName string) error
     AttachVolume(ctx context.Context, volumeName, mountPath string) error
 
+    // Setup operations - driver-specific host preparation
+    Setup(ctx context.Context, opts *SetupOptions) (*SetupResult, error)
+    VerifySetup(ctx context.Context) (*SetupStatus, error)
+    GetSetupInstructions(ctx context.Context) (*SetupInstructions, error)
+
     // Metadata
     DriverName() string
     RequiresRoot() bool
@@ -274,6 +279,100 @@ Attaches a volume to the virtual machine.
 - `ctx`: Context for cancellation and timeouts
 - `volumeName`: Name of volume to attach
 - `mountPath`: Path where volume should be mounted in VM
+
+### Setup Operations
+
+#### Setup(ctx context.Context, opts *SetupOptions) (*SetupResult, error)
+Performs automated setup of host system prerequisites for the driver.
+
+**Parameters:**
+- `ctx`: Context for cancellation and timeouts
+- `opts`: Setup options controlling behavior
+
+**Returns:**
+- `*SetupResult`: Results of setup actions performed
+- `error`: nil on success, error on failure
+
+**Behavior:**
+- Configures host system for driver requirements (KVM, networking, permissions)
+- Respects dry-run mode for testing without changes
+- Returns detailed results of all actions taken
+- Should be idempotent and handle partial completion
+
+**SetupOptions Structure:**
+```go
+type SetupOptions struct {
+    Interactive bool     // Allow interactive prompts
+    DryRun      bool     // Show what would be done without doing it
+    Force       bool     // Skip confirmation prompts
+    Components  []string // Specific components to setup
+}
+```
+
+**SetupResult Structure:**
+```go
+type SetupResult struct {
+    Success   bool          // Whether overall setup succeeded
+    Actions   []SetupAction // Actions that were performed
+    Warnings  []string      // Non-fatal issues encountered
+    NextSteps []string      // Manual steps still required
+}
+```
+
+#### VerifySetup(ctx context.Context) (*SetupStatus, error)
+Verifies that the driver's host prerequisites are properly configured.
+
+**Parameters:**
+- `ctx`: Context for cancellation and timeouts
+
+**Returns:**
+- `*SetupStatus`: Current setup status
+- `error`: nil on success, error on failure
+
+**Behavior:**
+- Checks all driver prerequisites without making changes
+- Reports component-by-component status
+- Provides specific resolution steps for issues found
+- Used by `spitfire driver verify <driver>` command
+
+**SetupStatus Structure:**
+```go
+type SetupStatus struct {
+    Ready      bool              // Whether driver is ready to use
+    Components []ComponentStatus // Status of individual components
+    Issues     []SetupIssue      // Problems that need resolution
+    Summary    string            // Human-readable overall status
+}
+```
+
+#### GetSetupInstructions(ctx context.Context) (*SetupInstructions, error)
+Returns comprehensive setup instructions for the driver.
+
+**Parameters:**
+- `ctx`: Context for cancellation and timeouts
+
+**Returns:**
+- `*SetupInstructions`: Complete setup guidance
+- `error`: nil on success, error on failure
+
+**Behavior:**
+- Provides both automated and manual setup steps
+- Includes documentation links and troubleshooting guides
+- Used by `spitfire driver instructions <driver>` command
+- Should be comprehensive for new users
+
+**SetupInstructions Structure:**
+```go
+type SetupInstructions struct {
+    Overview        string      // High-level explanation
+    Prerequisites   []string    // System requirements
+    AutomatedSteps  []SetupStep // Steps driver can do automatically
+    ManualSteps     []SetupStep // Steps requiring manual intervention
+    PostSetup       []string    // Things to do after setup
+    Documentation   []DocLink   // Relevant documentation links
+    Troubleshooting []DocLink   // Troubleshooting resources
+}
+```
 
 ### Metadata
 

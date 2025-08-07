@@ -4,7 +4,16 @@ This document provides a comprehensive reference for all configuration options a
 
 ## File Format
 
-Spitfire uses YAML configuration files with a structure inspired by Docker Compose. The configuration file typically named `spitfire.yml` or `spitfire.yaml`.
+Spitfire uses YAML configuration files with a structure inspired by Docker Compose. The configuration file is typically named `spitfire.yaml` or `spitfire.yml`.
+
+## Configuration Loading
+
+Spitfire VM commands (`spitfire vm up/down/ps`) operate on project-based configurations:
+
+- **Default Behavior**: Looks for `spitfire.yaml` in the current directory
+- **Custom Config**: Use `-f` flag to specify alternate config file
+- **Project-Based**: Each directory with a config file represents a project
+- **State Management**: VM state is persisted per project in `~/.spitfire/projects/`
 
 ## Root Level Properties
 
@@ -22,7 +31,7 @@ version: "1"
 
 ### `driver` (optional)
 
-Sets the default virtualization driver for all VMs.
+Sets the default virtualization driver for all VMs in this project.
 
 ```yaml
 driver: "firecracker"
@@ -31,640 +40,163 @@ driver: "firecracker"
 **Type**: String  
 **Required**: No  
 **Default**: Auto-selected based on driver registry priorities  
-**Valid Values**: Any registered driver name (`firecracker`, `qemu`, `virtualbox`, etc.)
-
-### `driver_opts` (optional)
-
-Global driver-specific configuration options.
-
-```yaml
-driver_opts:
-  firecracker:
-    jailer: true
-    cpu_template: "C3"
-  qemu:
-    accel: "kvm"
-    display: "none"
-```
-
-**Type**: Map of driver name to options map  
-**Required**: No  
-**Structure**: `driver_name: { option: value }`
-
-### `globals` (optional)
-
-Global settings that apply to all VMs unless overridden.
-
-```yaml
-globals:
-  kernel: "/path/to/vmlinux"
-  kernel_args: "console=ttyS0 quiet"
-  resources:
-    vcpu: 2
-    memory: "1GB"
-  networks:
-    - default
-  restart: "always"
-  env:
-    GLOBAL_VAR: "value"
-```
-
-See [Global Configuration](#global-configuration) for detailed options.
+**Valid Values**: Any registered driver name (use `spitfire driver ls` to see available drivers)
 
 ### `vms` (required)
 
-Defines the microVMs to be managed.
+Defines the virtual machines for this project. Each VM will be created and managed as part of the project lifecycle.
 
 ```yaml
 vms:
   web:
-    image: "nginx:alpine"
-  api:
-    image: "app:latest"
+    image: /path/to/rootfs.ext4
+    resources:
+      vcpu: 2
+      memory: 1GB
+  database:
+    image: /path/to/db-rootfs.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
 ```
 
 **Type**: Map of VM name to VM configuration  
-**Required**: Yes (at least one VM must be defined)
+**Required**: Yes (at least one VM must be defined)  
+**Structure**: `vm_name: { vm_config }`
 
-See [VM Configuration](#vm-configuration) for detailed options.
+## VM Configuration Properties
 
-### `networks` (optional)
+Each VM in the `vms` section supports the following configuration options:
 
-Defines custom networks for VM connectivity.
+### `image` (required)
 
-```yaml
-networks:
-  web-tier:
-    driver: bridge
-  isolated:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: "192.168.100.0/24"
-          gateway: "192.168.100.1"
-```
-
-See [Network Configuration](#network-configuration) for detailed options.
-
-### `volumes` (optional)
-
-Defines named volumes for persistent storage.
-
-```yaml
-volumes:
-  database:
-    driver: local
-    size: "20GB"
-    persist: true
-  cache:
-    driver: tmpfs
-    size: "1GB"
-```
-
-See [Volume Configuration](#volume-configuration) for detailed options.
-
-## Global Configuration
-
-The `globals` section defines default settings applied to all VMs.
-
-### `kernel` (optional)
-
-Path to the kernel image for VMs.
-
-```yaml
-globals:
-  kernel: "/opt/kernels/vmlinux"
-```
-
-**Type**: String (file path)  
-**Required**: No  
-**Default**: Driver-specific default
-
-### `kernel_args` (optional)
-
-Kernel command-line arguments.
-
-```yaml
-globals:
-  kernel_args: "console=ttyS0 noapic reboot=k panic=1"
-```
-
-**Type**: String  
-**Required**: No  
-**Default**: Driver-specific default
-
-### `resources` (optional)
-
-Default resource allocation for VMs.
-
-```yaml
-globals:
-  resources:
-    vcpu: 2
-    memory: "1GB"
-```
-
-See [Resource Configuration](#resource-configuration) for details.
-
-### `networks` (optional)
-
-Default networks for VMs.
-
-```yaml
-globals:
-  networks:
-    - default
-    - monitoring
-```
-
-**Type**: Array of network names  
-**Required**: No  
-**Default**: No networks attached
-
-### `restart` (optional)
-
-Default restart policy for VMs.
-
-```yaml
-globals:
-  restart: "always"
-```
-
-**Type**: String  
-**Required**: No  
-**Valid Values**: `always`, `on-failure`, `unless-stopped`, `no`  
-**Default**: `no`
-
-### `env` (optional)
-
-Global environment variables for all VMs.
-
-```yaml
-globals:
-  env:
-    APP_ENV: "production"
-    LOG_LEVEL: "info"
-```
-
-**Type**: Map of string to string  
-**Required**: No
-
-## VM Configuration
-
-Each VM is defined as a key-value pair under the `vms` section, where the key is the VM name and the value is the configuration.
-
-### `image` (conditionally required)
-
-Container image or VM image to use.
+Path to the rootfs image file for the VM.
 
 ```yaml
 vms:
   web:
-    image: "nginx:alpine"
+    image: /opt/spitfire/ubuntu.ext4
 ```
-
-**Type**: String  
-**Required**: Yes (unless `rootfs` is specified)  
-**Mutually Exclusive**: Cannot be used with `rootfs`
-
-### `rootfs` (conditionally required)
-
-Path to a rootfs filesystem image.
-
-```yaml
-vms:
-  custom:
-    rootfs: "/path/to/rootfs.ext4"
-```
-
-**Type**: String (file path)  
-**Required**: Yes (unless `image` is specified)  
-**Mutually Exclusive**: Cannot be used with `image`
-
-### `driver` (optional)
-
-Override the global driver for this specific VM.
-
-```yaml
-vms:
-  development:
-    image: "dev:latest"
-    driver: "qemu"
-```
-
-**Type**: String  
-**Required**: No  
-**Default**: Uses global `driver` setting
-
-### `driver_opts` (optional)
-
-VM-specific driver options that override global driver options.
-
-```yaml
-vms:
-  debug-vm:
-    image: "app:debug"
-    driver_opts:
-      log_level: "Debug"
-      enable_tracing: true
-```
-
-**Type**: Map of string to any  
-**Required**: No
-
-### `resources` (optional)
-
-Resource allocation for this VM.
-
-```yaml
-vms:
-  database:
-    image: "postgres:13"
-    resources:
-      vcpu: 4
-      memory: "4GB"
-```
-
-See [Resource Configuration](#resource-configuration) for details.
-
-### `volumes` (optional)
-
-Volume mounts for this VM.
-
-```yaml
-vms:
-  app:
-    image: "app:latest"
-    volumes:
-      - type: "bind"
-        source: "./config"
-        target: "/app/config"
-      - type: "volume"
-        source: "app-data"
-        target: "/data"
-```
-
-See [Volume Mount Configuration](#volume-mount-configuration) for details.
-
-### `env` (optional)
-
-Environment variables for this VM.
-
-```yaml
-vms:
-  api:
-    image: "api:latest"
-    env:
-      API_PORT: "8080"
-      DB_HOST: "database"
-```
-
-**Type**: Map of string to string  
-**Required**: No
-
-### `env_file` (optional)
-
-Load environment variables from files.
-
-```yaml
-vms:
-  app:
-    image: "app:latest"
-    env_file:
-      - ".env"
-      - "production.env"
-```
-
-**Type**: Array of file paths  
-**Required**: No
-
-### `depends_on` (optional)
-
-Specify VM startup dependencies.
-
-```yaml
-vms:
-  web:
-    image: "nginx:alpine"
-    depends_on:
-      - api
-      - database
-```
-
-**Type**: Array of VM names  
-**Required**: No
-
-### `networks` (optional)
-
-Networks to attach this VM to.
-
-```yaml
-vms:
-  web:
-    image: "nginx:alpine"
-    networks:
-      - frontend
-      - backend
-```
-
-**Type**: Array of network names  
-**Required**: No
-
-### `restart` (optional)
-
-Restart policy for this VM.
-
-```yaml
-vms:
-  worker:
-    image: "worker:latest"
-    restart: "on-failure"
-```
-
-**Type**: String  
-**Required**: No  
-**Valid Values**: `always`, `on-failure`, `unless-stopped`, `no`
-
-### `kernel` (optional)
-
-Override global kernel for this VM.
-
-```yaml
-vms:
-  special:
-    image: "special:latest"
-    kernel: "/opt/special-kernel/vmlinux"
-```
-
-**Type**: String (file path)  
-**Required**: No
-
-### `kernel_args` (optional)
-
-Override global kernel arguments for this VM.
-
-```yaml
-vms:
-  debug:
-    image: "app:debug"
-    kernel_args: "console=ttyS0 loglevel=8 debug"
-```
-
-**Type**: String  
-**Required**: No
-
-## Resource Configuration
-
-Resource configuration defines CPU and memory allocation.
-
-### `vcpu` (optional)
-
-Number of virtual CPUs.
-
-```yaml
-resources:
-  vcpu: 4
-```
-
-**Type**: Integer  
-**Required**: No  
-**Default**: 1  
-**Range**: 1-64 (driver dependent)
-
-### `memory` (optional)
-
-Memory allocation with size suffix.
-
-```yaml
-resources:
-  memory: "2GB"
-```
-
-**Type**: String with size suffix  
-**Required**: No  
-**Default**: "512MB"  
-**Valid Suffixes**: `MB`, `M`, `GB`, `G`  
-**Examples**: `"512MB"`, `"1GB"`, `"2G"`, `"256M"`
-
-## Volume Mount Configuration
-
-Volume mounts attach storage to VMs.
-
-### Short Syntax
-
-```yaml
-volumes:
-  - "./host/path:/container/path"
-  - "volume-name:/container/path"
-```
-
-### Long Syntax
-
-```yaml
-volumes:
-  - type: "bind"
-    source: "./host/path"
-    target: "/container/path"
-  - type: "volume"
-    source: "volume-name"
-    target: "/data"
-```
-
-### `type` (optional)
-
-Mount type.
-
-**Type**: String  
-**Required**: No (auto-detected)  
-**Valid Values**: `bind`, `volume`  
-**Auto-detection**: Paths with `/` are treated as `bind`, otherwise `volume`
-
-### `source` (required)
-
-Source of the mount.
 
 **Type**: String  
 **Required**: Yes  
-**For bind mounts**: Host filesystem path  
-**For volume mounts**: Named volume reference
+**Description**: Must be a valid path to an ext4 filesystem image that will serve as the VM's root filesystem
 
-### `target` (required)
+### `resources` (optional)
 
-Mount point inside the VM.
-
-**Type**: String  
-**Required**: Yes
-
-## Network Configuration
-
-Networks define isolated network segments for VMs.
-
-### `driver` (optional)
-
-Network driver type.
+CPU and memory resource allocation for the VM.
 
 ```yaml
-networks:
-  web-net:
-    driver: bridge
+vms:
+  web:
+    resources:
+      vcpu: 2
+      memory: 1GB
 ```
 
-**Type**: String  
+**Type**: Object  
 **Required**: No  
-**Default**: `bridge`  
-**Valid Values**: Driver-dependent (`bridge`, `host`, `none`)
+**Properties**:
+- `vcpu` (int): Number of virtual CPUs (default: 1)  
+- `memory` (string): Memory allocation with units (MB, GB) (default: "512MB")
 
-### `ipam` (optional)
+### `env` (optional)
 
-IP Address Management configuration.
-
-```yaml
-networks:
-  custom:
-    ipam:
-      config:
-        - subnet: "192.168.100.0/24"
-          gateway: "192.168.100.1"
-```
-
-#### `config` (optional)
-
-Array of IPAM configuration blocks.
-
-##### `subnet` (optional)
-
-Network subnet in CIDR notation.
-
-**Type**: String (CIDR)  
-**Example**: `"192.168.100.0/24"`
-
-##### `gateway` (optional)
-
-Gateway IP address.
-
-**Type**: String (IP address)  
-**Example**: `"192.168.100.1"`
-
-### `options` (optional)
-
-Driver-specific network options.
+Environment variables to set in the VM.
 
 ```yaml
-networks:
-  custom:
-    options:
-      com.docker.network.bridge.name: "spitfire0"
-      com.docker.network.driver.mtu: "1450"
+vms:
+  web:
+    env:
+      NODE_ENV: production
+      PORT: "3000"
 ```
 
-**Type**: Map of string to string
-
-## Volume Configuration
-
-Volumes define persistent storage that can be shared between VMs.
-
-### `driver` (optional)
-
-Volume driver type.
-
-```yaml
-volumes:
-  data:
-    driver: local
-```
-
-**Type**: String  
+**Type**: Map of string to string  
 **Required**: No  
-**Default**: `local`  
-**Valid Values**: Driver-dependent (`local`, `tmpfs`, `nfs`)
+**Description**: Environment variables passed to processes running in the VM
 
-### `persist` (optional)
+### `driver_opts` (optional)
 
-Whether the volume should persist after VM deletion.
+Driver-specific configuration options for this VM.
 
 ```yaml
-volumes:
+vms:
+  web:
+    driver_opts:
+      kernel: /opt/spitfire/vmlinux
+      debug: true
+      cpu_template: "C3"
+```
+
+**Type**: Map of option name to value  
+**Required**: No  
+**Description**: Options specific to the driver being used. Available options depend on the selected driver.
+
+#### Firecracker Driver Options
+- `kernel` (string): Path to kernel binary (vmlinux file)
+- `debug` (bool): Enable debug logging
+- `cpu_template` (string): CPU template for optimization ("C3", "T2", etc.)
+- `jailer` (bool): Run with jailer for additional security
+
+## Complete Example
+
+```yaml
+version: "1"
+driver: firecracker
+
+vms:
+  web:
+    image: /opt/spitfire/ubuntu.ext4
+    resources:
+      vcpu: 2
+      memory: 1GB
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
+      debug: false
+
   database:
-    persist: true
+    image: /opt/spitfire/postgres.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
+    env:
+      POSTGRES_DB: myapp
+      POSTGRES_USER: admin
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
 ```
 
-**Type**: Boolean  
-**Required**: No  
-**Default**: `false`
+## Project Lifecycle
 
-### `size` (optional)
+When you run VM commands, Spitfire:
 
-Volume size with suffix.
+1. **`spitfire vm up`**: Creates and starts all VMs defined in the config
+2. **`spitfire vm ps`**: Shows status of all VMs in the current project  
+3. **`spitfire vm down`**: Stops and removes all VMs in the current project
 
-```yaml
-volumes:
-  cache:
-    size: "10GB"
+Each project maintains its own state in `~/.spitfire/projects/<project-name>/` for persistence across restarts.
+
+## Usage Commands
+
+The configuration file drives the following VM lifecycle commands:
+
+```bash
+# Start all VMs defined in the config
+spitfire vm up
+
+# List running VMs for this project  
+spitfire vm ps
+
+# Stop and remove all VMs in this project
+spitfire vm down
 ```
 
-**Type**: String with size suffix  
-**Required**: No  
-**Valid Suffixes**: `MB`, `M`, `GB`, `G`, `TB`, `T`
+## See Also
 
-### `options` (optional)
-
-Driver-specific volume options.
-
-```yaml
-volumes:
-  nfs-data:
-    driver: nfs
-    options:
-      server: "192.168.1.100"
-      share: "/exports/data"
-```
-
-**Type**: Map of string to string
-
-## Environment Variable Expansion
-
-Environment variables can reference other variables or system environment variables.
-
-### Syntax
-
-```yaml
-env:
-  HOME_DIR: "${HOME}/app"
-  CONFIG_PATH: "${HOME_DIR}/config"
-  PORT: "${PORT:-8080}"  # Default value syntax
-```
-
-### Supported Formats
-
-- `${VAR}` - Variable substitution
-- `${VAR:-default}` - Variable with default value
-- `$VAR` - Short form variable substitution
-
-## Validation Rules
-
-### Required Fields
-
-- `version` must be specified
-- At least one VM must be defined in `vms`
-- Each VM must have either `image` or `rootfs` (but not both)
-
-### Name Restrictions
-
-- VM names must be valid identifiers
-- Network names must be unique within the configuration
-- Volume names must be unique within the configuration
-
-### Reference Validation
-
-- All network references in VMs must exist in `networks` section
-- All volume references in VMs must exist in `volumes` section
-- All `depends_on` references must point to existing VMs
-
-### Driver Validation
-
-- Driver names must be lowercase alphanumeric with hyphens
-- Driver options are validated by the specific driver implementation
-
-## Configuration Examples
-
-See the [Configuration System Documentation](spitfire-config-system.md) for comprehensive examples and usage patterns.
+- [Configuration Examples](./spitfire-config-examples.md) - Real-world configuration examples
+- [Configuration System](./spitfire-config-system.md) - Advanced configuration patterns
+- [Driver System](../driver/spitfire-driver-system.md) - Understanding driver selection and configuration

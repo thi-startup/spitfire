@@ -108,11 +108,15 @@ func (b *ConfigBuilder) buildMachineConfig() MachineConfig {
 func (b *ConfigBuilder) buildDrives() []Drive {
 	var drives []Drive
 
-	// Add root drive if rootfs is specified
-	if b.driverConfig.Rootfs != "" {
+	// Add root drive if rootfs or image is specified
+	rootfsPath := b.driverConfig.Rootfs
+	if rootfsPath == "" {
+		rootfsPath = b.driverConfig.Image
+	}
+	if rootfsPath != "" {
 		rootDrive := Drive{
 			DriveID:      "root",
-			PathOnHost:   b.driverConfig.Rootfs,
+			PathOnHost:   rootfsPath,
 			IsReadOnly:   false,
 			IsRootDevice: true,
 			CacheType:    CacheTypeUnsafe, // Use unsafe for better performance

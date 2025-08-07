@@ -5,15 +5,12 @@ import (
 	"testing"
 
 	"github.com/thi-startup/spitfire/pkg/driver"
-	"github.com/thi-startup/spitfire/pkg/driver/mock"
+	_ "github.com/thi-startup/spitfire/pkg/driver/mock" // Import for side effects (registration)
 )
 
 func TestDriverIntegration(t *testing.T) {
-	// Register the mock driver
-	err := mock.Register()
-	if err != nil {
-		t.Fatalf("Failed to register mock driver: %v", err)
-	}
+	// Mock driver should be automatically registered via init()
+	// Just verify it's available
 
 	// Test that the driver is now available
 	if !driver.Supported("mock") {

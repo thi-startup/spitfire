@@ -28,12 +28,12 @@ const (
 
 // Config holds logging configuration
 type Config struct {
-	Level    LogLevel
-	Verbose  bool
-	Debug    bool
-	Quiet    bool
-	LogFile  string
-	Format   string // "text" or "json"
+	Level   LogLevel
+	Verbose bool
+	Debug   bool
+	Quiet   bool
+	LogFile string
+	Format  string // "text" or "json"
 }
 
 var (
@@ -44,11 +44,11 @@ var (
 // NewLogger creates a new logger with the given configuration
 func NewLogger(config Config) *Logger {
 	logger := logrus.New()
-	
+
 	// Set output (logs go to stderr by default, user output to stdout)
 	userOutput := os.Stdout
 	logOutput := os.Stderr
-	
+
 	// Handle log file output
 	if config.LogFile != "" {
 		file, err := os.OpenFile(config.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -57,13 +57,13 @@ func NewLogger(config Config) *Logger {
 		}
 		// If file creation fails, fall back to stderr
 	}
-	
+
 	logger.SetOutput(logOutput)
-	
+
 	// Set log level
 	level := parseLogLevel(config)
 	logger.SetLevel(level)
-	
+
 	// Set formatter
 	if config.Format == "json" {
 		logger.SetFormatter(&logrus.JSONFormatter{})
@@ -75,7 +75,7 @@ func NewLogger(config Config) *Logger {
 			PadLevelText:     true,
 		})
 	}
-	
+
 	return &Logger{
 		Logger:     logger,
 		userOutput: userOutput,
@@ -97,7 +97,7 @@ func parseLogLevel(config Config) logrus.Level {
 	case ErrorLevel:
 		return logrus.ErrorLevel
 	}
-	
+
 	// Handle flags
 	if config.Debug {
 		return logrus.DebugLevel
@@ -108,7 +108,7 @@ func parseLogLevel(config Config) logrus.Level {
 	if config.Quiet {
 		return logrus.ErrorLevel
 	}
-	
+
 	// Default to warn level (show warnings and errors)
 	return logrus.WarnLevel
 }

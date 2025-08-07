@@ -21,7 +21,7 @@ var (
 func main() {
 	root := &cobra.Command{
 		Use:              "spitfire",
-		Short:            "Manage Firecracker microVMs with a Docker Compose-like experience",
+		Short:            "Manage (micro)VMs with a Docker Compose-like experience",
 		Version:          fmt.Sprintf("Version:\t%s+%s\nBuildTime:\t%s\n", version, commitHash, buildTime),
 		PersistentPreRun: func(cmd *cobra.Command, args []string) { initializeLogging(cmd) },
 		Run: func(cmd *cobra.Command, args []string) {
@@ -39,8 +39,7 @@ func main() {
 		newVMCommands(),
 		newVolumeCommands(),
 		newConfigCommands(),
-		newSetupCommand(),
-		newDriverCmd(), // Register new driver command
+		newDriverCmd(), // Consolidated driver command with setup functionality
 	)
 
 	if err := root.Execute(); err != nil {

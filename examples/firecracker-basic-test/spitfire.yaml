@@ -1,0 +1,14 @@
+version: "1"
+driver: firecracker
+
+vms:
+  web:
+    image: /opt/spitfire/ubuntu.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
+    env:
+      NODE_ENV: production
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
+      debug: true

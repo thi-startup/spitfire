@@ -6,6 +6,8 @@ import (
 	"time"
 )
 
+//go:generate stringer -type=Priority,VMState
+
 // Priority determines driver selection order
 type Priority int
 
@@ -47,27 +49,6 @@ const (
 	Stopped
 	Error
 )
-
-func (s VMState) String() string {
-	switch s {
-	case None:
-		return "None"
-	case Starting:
-		return "Starting"
-	case Running:
-		return "Running"
-	case Paused:
-		return "Paused"
-	case Stopping:
-		return "Stopping"
-	case Stopped:
-		return "Stopped"
-	case Error:
-		return "Error"
-	default:
-		return "Unknown"
-	}
-}
 
 // VMInfo contains information about a virtual machine
 type VMInfo struct {
@@ -214,10 +195,10 @@ type SetupAction struct {
 
 // SetupStatus represents the current setup state of a driver
 type SetupStatus struct {
-	Ready      bool               // Whether the driver is ready to use
-	Components []ComponentStatus  // Status of individual components
-	Issues     []SetupIssue       // Problems that need to be resolved
-	Summary    string             // Human-readable summary of overall status
+	Ready      bool              // Whether the driver is ready to use
+	Components []ComponentStatus // Status of individual components
+	Issues     []SetupIssue      // Problems that need to be resolved
+	Summary    string            // Human-readable summary of overall status
 }
 
 // ComponentStatus represents the status of a single setup component
@@ -262,12 +243,12 @@ type SetupInstructions struct {
 
 // SetupStep represents a single step in the setup process
 type SetupStep struct {
-	Name        string   // Short name for this step
-	Description string   // Detailed description of what this step does
-	Commands    []string // Commands to execute for this step
-	Verification string  // How to verify this step worked
-	Required    bool     // Whether this step is mandatory
-	Sudo        bool     // Whether this step requires root privileges
+	Name         string   // Short name for this step
+	Description  string   // Detailed description of what this step does
+	Commands     []string // Commands to execute for this step
+	Verification string   // How to verify this step worked
+	Required     bool     // Whether this step is mandatory
+	Sudo         bool     // Whether this step requires root privileges
 }
 
 // DocLink represents a link to documentation

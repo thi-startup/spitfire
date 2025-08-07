@@ -13,8 +13,12 @@ MAIN = $(addprefix cmd/, $(APP))
 BIN = $(addprefix bin/, $(APP))
 
 # all: spitfire init clean test lint
-.PHONY: clean test lint
+.PHONY: clean test lint install uninstall
 .DEFAULT_GOAL := $(BIN)
+
+# Installation paths
+PREFIX ?= /usr/local
+INSTALL_DIR = $(PREFIX)/bin
 
 $(BIN_DIR) $(TMP_DIR):
 	mkdir -p $@
@@ -39,6 +43,19 @@ lint:
 deps:
 	go mod download
 	go mod tidy
+
+install: $(BIN)
+	@echo "Installing spitfire to $(INSTALL_DIR)"
+	sudo mkdir -p $(INSTALL_DIR)
+	sudo cp $(BIN) $(INSTALL_DIR)/spitfire
+	sudo chmod +x $(INSTALL_DIR)/spitfire
+	@echo "Installation complete! spitfire is now available system-wide"
+	@echo "Try: spitfire --version"
+
+uninstall:
+	@echo "Removing spitfire from $(INSTALL_DIR)"
+	sudo rm -f $(INSTALL_DIR)/spitfire
+	@echo "Uninstallation complete!"
 
 info:
 	@echo "Version: $(VERSION)"

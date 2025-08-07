@@ -82,7 +82,7 @@ func runVolumeList(outputFormat string, quiet bool) error {
 
 	// Handle output - same clean pattern as VM listing
 	printer := output.NewPrinter(format, nil)
-	
+
 	if quiet {
 		output.PrintQuiet(volumeNames, nil)
 		return nil

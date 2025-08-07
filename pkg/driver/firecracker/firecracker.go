@@ -6,7 +6,9 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -475,18 +477,825 @@ func (d *Driver) SupportedFeatures() []driver.Feature {
 
 // Setup implements driver.Driver for Firecracker-specific host setup
 func (d *Driver) Setup(ctx context.Context, opts *driver.SetupOptions) (*driver.SetupResult, error) {
-	// TODO: Implement Firecracker-specific setup
-	return nil, fmt.Errorf("Setup not yet implemented for Firecracker driver")
+	result := &driver.SetupResult{
+		Success: true,
+		Actions: []driver.SetupAction{},
+	}
+
+	log.Progress("Starting Firecracker driver setup...")
+
+	// 1. Verify system requirements and binaries
+	if err := d.verifySystemRequirements(opts, result); err != nil {
+		result.Success = false
+		return result, err
+	}
+
+	// 2. Setup KVM access and permissions
+	if err := d.setupKVMAccess(opts, result); err != nil {
+		result.Success = false
+		return result, err
+	}
+
+	// 3. Setup networking infrastructure
+	if err := d.setupNetworking(opts, result); err != nil {
+		result.Success = false
+		return result, err
+	}
+
+	// 4. Setup firewall rules
+	if err := d.setupFirewall(opts, result); err != nil {
+		result.Success = false
+		return result, err
+	}
+
+	// 5. Create required directories
+	if err := d.setupDirectories(opts, result); err != nil {
+		result.Success = false
+		return result, err
+	}
+
+	// Add final success message
+	if result.Success {
+		result.NextSteps = []string{
+			"Log out and back in (or reboot) if user was added to kvm group",
+			"Verify setup with: spitfire driver verify firecracker",
+			"Test with a simple VM: spitfire up --driver firecracker",
+		}
+	}
+
+	return result, nil
+}
+
+// verifySystemRequirements checks system prerequisites and required binaries
+func (d *Driver) verifySystemRequirements(opts *driver.SetupOptions, result *driver.SetupResult) error {
+	log.Debugf("Verifying system requirements...")
+
+	// Check required binaries
+	requiredBinaries := []struct {
+		name     string
+		required bool
+		desc     string
+	}{
+		{"firecracker", true, "Firecracker hypervisor binary"},
+		{"ip", true, "Network configuration utility"},
+		{"iptables", true, "Firewall configuration utility"},
+		{"brctl", false, "Bridge control utility (optional, ip can substitute)"},
+	}
+
+	for _, binary := range requiredBinaries {
+		path, err := exec.LookPath(binary.name)
+		action := driver.SetupAction{
+			Component:   "binaries",
+			Description: fmt.Sprintf("Checking %s: %s", binary.name, binary.desc),
+			Success:     err == nil,
+		}
+
+		if err != nil {
+			if binary.required {
+				action.Error = fmt.Sprintf("Required binary %s not found in PATH", binary.name)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("required binary %s not found", binary.name)
+			} else {
+				action.Description = fmt.Sprintf("Optional binary %s not found (skipping)", binary.name)
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Optional binary %s not found", binary.name))
+			}
+		} else {
+			action.Description = fmt.Sprintf("Found %s at %s", binary.name, path)
+		}
+
+		if !opts.DryRun {
+			result.Actions = append(result.Actions, action)
+		}
+	}
+
+	return nil
+}
+
+// setupKVMAccess ensures KVM device access and user permissions
+func (d *Driver) setupKVMAccess(opts *driver.SetupOptions, result *driver.SetupResult) error {
+	log.Debugf("Setting up KVM access...")
+
+	// Check if /dev/kvm exists
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		action := driver.SetupAction{
+			Component:   "kvm",
+			Description: "Checking KVM device access",
+			Success:     false,
+			Error:       "KVM device /dev/kvm not found - hardware virtualization not supported",
+		}
+		result.Actions = append(result.Actions, action)
+		return fmt.Errorf("KVM not supported on this system")
+	}
+
+	// Check if user is in kvm group
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
+	}
+
+	groups, err := currentUser.GroupIds()
+	if err != nil {
+		return fmt.Errorf("failed to get user groups: %w", err)
+	}
+
+	inKVMGroup := false
+	for _, gid := range groups {
+		if group, err := user.LookupGroupId(gid); err == nil && group.Name == "kvm" {
+			inKVMGroup = true
+			break
+		}
+	}
+
+	action := driver.SetupAction{
+		Component:   "kvm-permissions",
+		Description: "Checking KVM group membership",
+		Success:     inKVMGroup,
+	}
+
+	if inKVMGroup {
+		action.Description = "User is already in kvm group"
+	} else {
+		action.Description = "User needs to be added to kvm group"
+		action.Command = fmt.Sprintf("sudo usermod -a -G kvm %s", currentUser.Username)
+
+		if !opts.DryRun {
+			// Try to add user to kvm group
+			cmd := exec.Command("sudo", "usermod", "-a", "-G", "kvm", currentUser.Username)
+			if err := cmd.Run(); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to add user to kvm group: %v", err)
+			} else {
+				action.Success = true
+				action.Description = "Successfully added user to kvm group"
+				result.NextSteps = append(result.NextSteps, "Log out and back in for group membership to take effect")
+			}
+		}
+	}
+
+	result.Actions = append(result.Actions, action)
+	return nil
+}
+
+// setupNetworking creates network bridge and configures IP forwarding
+func (d *Driver) setupNetworking(opts *driver.SetupOptions, result *driver.SetupResult) error {
+	log.Debugf("Setting up networking...")
+
+	bridgeName := "spitfire0"
+	bridgeIP := "172.16.0.1/24"
+
+	// Check if bridge already exists
+	_, err := net.InterfaceByName(bridgeName)
+	bridgeExists := err == nil
+
+	if !bridgeExists {
+		// Create bridge
+		action := driver.SetupAction{
+			Component:   "networking",
+			Description: fmt.Sprintf("Creating bridge interface %s", bridgeName),
+			Command:     fmt.Sprintf("ip link add %s type bridge", bridgeName),
+		}
+
+		if !opts.DryRun {
+			cmd := exec.Command("sudo", "ip", "link", "add", bridgeName, "type", "bridge")
+			if err := cmd.Run(); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to create bridge: %v", err)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("failed to create bridge interface: %w", err)
+			}
+			action.Success = true
+		} else {
+			action.Success = true
+		}
+		result.Actions = append(result.Actions, action)
+
+		// Set bridge IP
+		action = driver.SetupAction{
+			Component:   "networking",
+			Description: fmt.Sprintf("Configuring bridge IP %s", bridgeIP),
+			Command:     fmt.Sprintf("ip addr add %s dev %s", bridgeIP, bridgeName),
+		}
+
+		if !opts.DryRun {
+			cmd := exec.Command("sudo", "ip", "addr", "add", bridgeIP, "dev", bridgeName)
+			if err := cmd.Run(); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to set bridge IP: %v", err)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("failed to set bridge IP: %w", err)
+			}
+			action.Success = true
+		} else {
+			action.Success = true
+		}
+		result.Actions = append(result.Actions, action)
+
+		// Bring bridge up
+		action = driver.SetupAction{
+			Component:   "networking",
+			Description: fmt.Sprintf("Bringing up bridge interface %s", bridgeName),
+			Command:     fmt.Sprintf("ip link set %s up", bridgeName),
+		}
+
+		if !opts.DryRun {
+			cmd := exec.Command("sudo", "ip", "link", "set", bridgeName, "up")
+			if err := cmd.Run(); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to bring up bridge: %v", err)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("failed to bring up bridge: %w", err)
+			}
+			action.Success = true
+		} else {
+			action.Success = true
+		}
+		result.Actions = append(result.Actions, action)
+	} else {
+		// Bridge already exists
+		action := driver.SetupAction{
+			Component:   "networking",
+			Description: fmt.Sprintf("Bridge %s already exists", bridgeName),
+			Success:     true,
+		}
+		result.Actions = append(result.Actions, action)
+	}
+
+	// Enable IP forwarding
+	forwardingBytes, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		return fmt.Errorf("failed to read IP forwarding status: %w", err)
+	}
+
+	forwardingEnabled := strings.TrimSpace(string(forwardingBytes)) == "1"
+	
+	action := driver.SetupAction{
+		Component:   "networking",
+		Description: "Enabling IP forwarding",
+		Command:     "echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward",
+	}
+
+	if !forwardingEnabled {
+		if !opts.DryRun {
+			cmd := exec.Command("sudo", "tee", "/proc/sys/net/ipv4/ip_forward")
+			cmd.Stdin = strings.NewReader("1")
+			if err := cmd.Run(); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to enable IP forwarding: %v", err)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("failed to enable IP forwarding: %w", err)
+			}
+			action.Success = true
+		} else {
+			action.Success = true
+		}
+	} else {
+		action.Description = "IP forwarding already enabled"
+		action.Success = true
+	}
+	result.Actions = append(result.Actions, action)
+
+	return nil
+}
+
+// setupFirewall configures iptables rules for VM networking
+func (d *Driver) setupFirewall(opts *driver.SetupOptions, result *driver.SetupResult) error {
+	log.Debugf("Setting up firewall rules...")
+
+	bridgeName := "spitfire0"
+	subnet := "172.16.0.0/24"
+
+	firewallRules := []struct {
+		description string
+		command     []string
+	}{
+		{
+			description: fmt.Sprintf("Allow forwarding from %s", bridgeName),
+			command:     []string{"iptables", "-A", "FORWARD", "-i", bridgeName, "-j", "ACCEPT"},
+		},
+		{
+			description: fmt.Sprintf("Allow forwarding to %s", bridgeName),  
+			command:     []string{"iptables", "-A", "FORWARD", "-o", bridgeName, "-j", "ACCEPT"},
+		},
+		{
+			description: fmt.Sprintf("Enable NAT for %s", subnet),
+			command:     []string{"iptables", "-t", "nat", "-A", "POSTROUTING", "-s", subnet, "!", "-d", subnet, "-j", "MASQUERADE"},
+		},
+	}
+
+	for _, rule := range firewallRules {
+		action := driver.SetupAction{
+			Component:   "firewall",
+			Description: rule.description,
+			Command:     "sudo " + strings.Join(rule.command, " "),
+		}
+
+		if !opts.DryRun {
+			args := append([]string{rule.command[0]}, rule.command[1:]...)
+			cmd := exec.Command("sudo", args...)
+			if err := cmd.Run(); err != nil {
+				// Don't fail on firewall rules - they might already exist
+				action.Success = false
+				action.Error = fmt.Sprintf("Rule may already exist: %v", err)
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Firewall rule failed (may already exist): %s", rule.description))
+			} else {
+				action.Success = true
+			}
+		} else {
+			action.Success = true
+		}
+		result.Actions = append(result.Actions, action)
+	}
+
+	return nil
+}
+
+// setupDirectories creates required state directories
+func (d *Driver) setupDirectories(opts *driver.SetupOptions, result *driver.SetupResult) error {
+	log.Debugf("Setting up directories...")
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get current user: %w", err)
+	}
+
+	directories := []string{
+		filepath.Join(currentUser.HomeDir, ".spitfire"),
+		filepath.Join(currentUser.HomeDir, ".spitfire", "vm"),
+		filepath.Join(currentUser.HomeDir, ".spitfire", "network"), 
+		filepath.Join(currentUser.HomeDir, ".spitfire", "kernels"),
+		"/tmp/spitfire",
+		"/tmp/spitfire/sockets",
+	}
+
+	for _, dir := range directories {
+		action := driver.SetupAction{
+			Component:   "directories",
+			Description: fmt.Sprintf("Creating directory %s", dir),
+		}
+
+		if !opts.DryRun {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				action.Success = false
+				action.Error = fmt.Sprintf("Failed to create directory: %v", err)
+				result.Actions = append(result.Actions, action)
+				return fmt.Errorf("failed to create directory %s: %w", dir, err)
+			}
+			action.Success = true
+		} else {
+			action.Success = true
+		}
+		result.Actions = append(result.Actions, action)
+	}
+
+	return nil
 }
 
 // VerifySetup implements driver.Driver for Firecracker setup verification
 func (d *Driver) VerifySetup(ctx context.Context) (*driver.SetupStatus, error) {
-	// TODO: Implement Firecracker-specific setup verification
-	return nil, fmt.Errorf("VerifySetup not yet implemented for Firecracker driver")
+	status := &driver.SetupStatus{
+		Ready:      true,
+		Components: []driver.ComponentStatus{},
+		Issues:     []driver.SetupIssue{},
+	}
+
+	log.Debugf("Verifying Firecracker driver setup...")
+
+	// Verify each component
+	components := []func() driver.ComponentStatus{
+		d.verifyFirecrackerBinary,
+		d.verifyKVMAccess,
+		d.verifyNetworking,
+		d.verifyDirectories,
+		d.verifyIPForwarding,
+	}
+
+	for _, verifyFunc := range components {
+		compStatus := verifyFunc()
+		status.Components = append(status.Components, compStatus)
+
+		// If a required component is not ready, mark overall status as not ready
+		if !compStatus.Ready && compStatus.Required {
+			status.Ready = false
+			// Create issue for this component
+			issue := d.createIssueForComponent(compStatus)
+			status.Issues = append(status.Issues, issue)
+		}
+	}
+
+	// Set summary message
+	if status.Ready {
+		status.Summary = "Firecracker driver is ready to use"
+	} else {
+		status.Summary = fmt.Sprintf("Firecracker driver has %d setup issues", len(status.Issues))
+	}
+
+	return status, nil
+}
+
+// verifyFirecrackerBinary checks if Firecracker binary is available
+func (d *Driver) verifyFirecrackerBinary() driver.ComponentStatus {
+	path, err := exec.LookPath("firecracker")
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "firecracker-binary",
+			Ready:       false,
+			Required:    true,
+			Description: "Firecracker hypervisor binary",
+			Status:      "Not found in PATH",
+		}
+	}
+
+	// Check version
+	output, err := exec.Command(path, "--version").Output()
+	version := "unknown"
+	if err == nil {
+		version = strings.TrimSpace(string(output))
+	}
+
+	return driver.ComponentStatus{
+		Name:        "firecracker-binary",
+		Ready:       true,
+		Required:    true,
+		Description: "Firecracker hypervisor binary",
+		Status:      fmt.Sprintf("Ready at %s (version: %s)", path, version),
+	}
+}
+
+// verifyKVMAccess checks KVM device access and permissions
+func (d *Driver) verifyKVMAccess() driver.ComponentStatus {
+	// Check if /dev/kvm exists
+	if _, err := os.Stat("/dev/kvm"); err != nil {
+		return driver.ComponentStatus{
+			Name:        "kvm-device",
+			Ready:       false,
+			Required:    true,
+			Description: "KVM virtualization device access",
+			Status:      "KVM device /dev/kvm not found",
+		}
+	}
+
+	// Check if user is in kvm group
+	currentUser, err := user.Current()
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "kvm-permissions",
+			Ready:       false,
+			Required:    true,
+			Description: "User permissions for KVM access",
+			Status:      "Unable to determine user information",
+		}
+	}
+
+	groups, err := currentUser.GroupIds()
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "kvm-permissions",
+			Ready:       false,
+			Required:    true,
+			Description: "User permissions for KVM access",
+			Status:      "Unable to determine user groups",
+		}
+	}
+
+	inKVMGroup := false
+	for _, gid := range groups {
+		if group, err := user.LookupGroupId(gid); err == nil && group.Name == "kvm" {
+			inKVMGroup = true
+			break
+		}
+	}
+
+	if !inKVMGroup {
+		return driver.ComponentStatus{
+			Name:        "kvm-permissions",
+			Ready:       false,
+			Required:    true,
+			Description: "User permissions for KVM access",
+			Status:      "User not in kvm group",
+		}
+	}
+
+	return driver.ComponentStatus{
+		Name:        "kvm-permissions",
+		Ready:       true,
+		Required:    true,
+		Description: "User permissions for KVM access",
+		Status:      "User is in kvm group",
+	}
+}
+
+// verifyNetworking checks network bridge setup
+func (d *Driver) verifyNetworking() driver.ComponentStatus {
+	bridgeName := "spitfire0"
+	
+	// Check if bridge exists
+	iface, err := net.InterfaceByName(bridgeName)
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "network-bridge",
+			Ready:       false,
+			Required:    true,
+			Description: "Spitfire network bridge interface",
+			Status:      fmt.Sprintf("Bridge %s not found", bridgeName),
+		}
+	}
+
+	// Check if bridge is up
+	isUp := iface.Flags&net.FlagUp != 0
+
+	return driver.ComponentStatus{
+		Name:        "network-bridge",
+		Ready:       isUp,
+		Required:    true,
+		Description: "Spitfire network bridge interface",
+		Status:      fmt.Sprintf("Bridge %s exists and is %s", bridgeName, map[bool]string{true: "up", false: "down"}[isUp]),
+	}
+}
+
+// verifyDirectories checks required state directories
+func (d *Driver) verifyDirectories() driver.ComponentStatus {
+	currentUser, err := user.Current()
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "directories",
+			Ready:       false,
+			Required:    true,
+			Description: "Required state directories",
+			Status:      "Unable to determine user home directory",
+		}
+	}
+
+	requiredDirs := []string{
+		filepath.Join(currentUser.HomeDir, ".spitfire"),
+		"/tmp/spitfire",
+		"/tmp/spitfire/sockets",
+	}
+
+	missingDirs := []string{}
+	for _, dir := range requiredDirs {
+		if _, err := os.Stat(dir); err != nil {
+			missingDirs = append(missingDirs, dir)
+		}
+	}
+
+	if len(missingDirs) > 0 {
+		return driver.ComponentStatus{
+			Name:        "directories",
+			Ready:       false,
+			Required:    true,
+			Description: "Required state directories",
+			Status:      fmt.Sprintf("Missing directories: %s", strings.Join(missingDirs, ", ")),
+		}
+	}
+
+	return driver.ComponentStatus{
+		Name:        "directories",
+		Ready:       true,
+		Required:    true,
+		Description: "Required state directories",
+		Status:      "All required directories exist",
+	}
+}
+
+// verifyIPForwarding checks if IP forwarding is enabled
+func (d *Driver) verifyIPForwarding() driver.ComponentStatus {
+	data, err := os.ReadFile("/proc/sys/net/ipv4/ip_forward")
+	if err != nil {
+		return driver.ComponentStatus{
+			Name:        "ip-forwarding",
+			Ready:       false,
+			Required:    true,
+			Description: "IP forwarding for VM networking",
+			Status:      "Unable to check IP forwarding status",
+		}
+	}
+
+	enabled := strings.TrimSpace(string(data)) == "1"
+
+	return driver.ComponentStatus{
+		Name:        "ip-forwarding",
+		Ready:       enabled,
+		Required:    true,
+		Description: "IP forwarding for VM networking",
+		Status:      fmt.Sprintf("IP forwarding is %s", map[bool]string{true: "enabled", false: "disabled"}[enabled]),
+	}
+}
+
+// createIssueForComponent creates a SetupIssue for a failed component
+func (d *Driver) createIssueForComponent(component driver.ComponentStatus) driver.SetupIssue {
+	issue := driver.SetupIssue{
+		Component:   component.Name,
+		Description: component.Status,
+		Severity:    driver.SeverityError,
+	}
+
+	// Provide specific resolution instructions based on component
+	switch component.Name {
+	case "firecracker-binary":
+		issue.Resolution = "Install Firecracker binary"
+		issue.Commands = []string{
+			"# On Arch Linux:",
+			"sudo pacman -S firecracker",
+			"# On Ubuntu/Debian:",
+			"curl -LOJ https://github.com/firecracker-microvm/firecracker/releases/latest/download/firecracker-v1.4.0-x86_64.tgz",
+			"tar xzf firecracker-v1.4.0-x86_64.tgz",
+			"sudo cp release-v1.4.0-x86_64/firecracker-v1.4.0-x86_64 /usr/local/bin/firecracker",
+		}
+
+	case "kvm-device":
+		issue.Resolution = "Enable hardware virtualization in BIOS and load KVM modules"
+		issue.Commands = []string{
+			"# Load KVM modules",
+			"sudo modprobe kvm-intel  # For Intel CPUs",
+			"sudo modprobe kvm-amd    # For AMD CPUs", 
+		}
+		issue.Severity = driver.SeverityCritical
+
+	case "kvm-permissions":
+		issue.Resolution = "Add user to kvm group and log out/in"
+		issue.Commands = []string{
+			"sudo usermod -a -G kvm $USER",
+			"# Then log out and back in, or reboot",
+		}
+
+	case "network-bridge":
+		issue.Resolution = "Create and configure spitfire bridge"
+		issue.Commands = []string{
+			"sudo ip link add spitfire0 type bridge",
+			"sudo ip addr add 172.16.0.1/24 dev spitfire0",
+			"sudo ip link set spitfire0 up",
+		}
+
+	case "directories":
+		issue.Resolution = "Create required state directories"
+		issue.Commands = []string{
+			"mkdir -p ~/.spitfire/{vm,network,kernels}",
+			"sudo mkdir -p /tmp/spitfire/sockets",
+		}
+
+	case "ip-forwarding":
+		issue.Resolution = "Enable IP forwarding"
+		issue.Commands = []string{
+			"echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward",
+			"# Make permanent:",
+			"echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.conf",
+		}
+	}
+
+	return issue
 }
 
 // GetSetupInstructions implements driver.Driver for Firecracker setup instructions
 func (d *Driver) GetSetupInstructions(ctx context.Context) (*driver.SetupInstructions, error) {
-	// TODO: Implement Firecracker-specific setup instructions
-	return nil, fmt.Errorf("GetSetupInstructions not yet implemented for Firecracker driver")
+	return &driver.SetupInstructions{
+		Overview: `The Firecracker driver provides lightweight microVM virtualization using Amazon's Firecracker VMM.
+This setup configures KVM permissions, network infrastructure, and security settings required for Firecracker to operate.`,
+
+		Prerequisites: []string{
+			"Linux system with KVM support (Intel VT-x or AMD-V required)",
+			"Kernel version 4.14+ with KVM modules loaded",
+			"At least 1GB available memory for VMs",
+			"Root or sudo access for system configuration",
+			"Firecracker binary installed (v1.0.0 or later recommended)",
+		},
+
+		AutomatedSteps: []driver.SetupStep{
+			{
+				Name:        "Install Firecracker Binary",
+				Description: "Download and install the Firecracker hypervisor binary",
+				Commands: []string{
+					"curl -LOJ https://github.com/firecracker-microvm/firecracker/releases/latest/download/firecracker-v1.4.1-x86_64.tgz",
+					"tar xvf firecracker-v1.4.1-x86_64.tgz",
+					"sudo mv release-v1.4.1-x86_64/firecracker-v1.4.1-x86_64 /usr/local/bin/firecracker",
+					"sudo chmod +x /usr/local/bin/firecracker",
+				},
+				Verification: "firecracker --version",
+				Required:     true,
+				Sudo:         true,
+			},
+			{
+				Name:        "Configure KVM Access",
+				Description: "Set up KVM device permissions and add user to kvm group",
+				Commands: []string{
+					"sudo usermod -aG kvm $USER",
+					"sudo chmod 666 /dev/kvm",
+					"sudo chown root:kvm /dev/kvm",
+				},
+				Verification: "ls -la /dev/kvm && groups | grep kvm",
+				Required:     true,
+				Sudo:         true,
+			},
+			{
+				Name:        "Setup Network Bridge",
+				Description: "Create and configure network bridge for VM networking",
+				Commands: []string{
+					"sudo ip link add spitfire-br type bridge",
+					"sudo ip addr add 172.16.0.1/24 dev spitfire-br",
+					"sudo ip link set spitfire-br up",
+				},
+				Verification: "ip link show spitfire-br",
+				Required:     true,
+				Sudo:         true,
+			},
+			{
+				Name:        "Configure IP Forwarding",
+				Description: "Enable IP forwarding for VM internet access",
+				Commands: []string{
+					"echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.conf",
+					"sudo sysctl -p",
+				},
+				Verification: "sysctl net.ipv4.ip_forward",
+				Required:     true,
+				Sudo:         true,
+			},
+			{
+				Name:        "Setup Firewall Rules",
+				Description: "Configure iptables for VM network access and NAT",
+				Commands: []string{
+					"sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/24 -j MASQUERADE",
+					"sudo iptables -A FORWARD -i spitfire-br -j ACCEPT",
+					"sudo iptables -A FORWARD -o spitfire-br -j ACCEPT",
+				},
+				Verification: "sudo iptables -t nat -L POSTROUTING -n | grep 172.16.0.0/24",
+				Required:     true,
+				Sudo:         true,
+			},
+		},
+
+		ManualSteps: []driver.SetupStep{
+			{
+				Name:        "Install Rootfs Images",
+				Description: "Download and configure rootfs images for your VMs",
+				Commands: []string{
+					"mkdir -p ~/.spitfire/images",
+					"# Download Ubuntu rootfs:",
+					"curl -o ~/.spitfire/images/ubuntu.ext4 https://s3.amazonaws.com/spec.ccfc.min/img/hello/fsfiles/hello-rootfs.ext4",
+				},
+				Verification: "ls -la ~/.spitfire/images/",
+				Required:     false,
+			},
+			{
+				Name:        "Configure Persistent Network",
+				Description: "Make network configuration persistent across reboots",
+				Commands: []string{
+					"# Add to /etc/systemd/network/spitfire-br.network:",
+					"[Match]",
+					"Name=spitfire-br",
+					"[Network]",
+					"Address=172.16.0.1/24",
+					"IPForward=yes",
+				},
+				Verification: "systemctl status systemd-networkd",
+				Required:     false,
+			},
+		},
+
+		PostSetup: []string{
+			"Log out and back in (or reboot) to activate kvm group membership",
+			"Test basic functionality with: spitfire driver verify firecracker",
+			"Create your first VM with: spitfire up --driver firecracker --image ubuntu",
+			"Monitor VM status with: spitfire ps",
+		},
+
+		Documentation: []driver.DocLink{
+			{
+				Title:       "Firecracker Getting Started",
+				URL:         "https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md",
+				Description: "Official Firecracker quickstart guide",
+			},
+			{
+				Title:       "Firecracker Network Setup",
+				URL:         "https://github.com/firecracker-microvm/firecracker/blob/main/docs/network-setup.md",
+				Description: "Detailed network configuration for Firecracker VMs",
+			},
+			{
+				Title:       "KVM Setup Guide",
+				URL:         "https://help.ubuntu.com/community/KVM/Installation",
+				Description: "Ubuntu KVM installation and configuration",
+			},
+			{
+				Title:       "Spitfire Documentation",
+				URL:         "https://github.com/thi-startup/spitfire/docs",
+				Description: "Complete Spitfire usage documentation",
+			},
+		},
+
+		Troubleshooting: []driver.DocLink{
+			{
+				Title:       "Firecracker Troubleshooting",
+				URL:         "https://github.com/firecracker-microvm/firecracker/blob/main/docs/troubleshooting.md",
+				Description: "Common Firecracker issues and solutions",
+			},
+			{
+				Title:       "KVM Permission Issues",
+				URL:         "https://askubuntu.com/questions/564910/kvm-is-not-installed-on-this-machine-dev-kvm-is-missing",
+				Description: "Solving /dev/kvm access problems",
+			},
+			{
+				Title:       "Network Bridge Issues",
+				URL:         "https://wiki.archlinux.org/title/Network_bridge",
+				Description: "Linux bridge configuration troubleshooting",
+			},
+		},
+	}, nil
 }
