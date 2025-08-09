@@ -11,6 +11,7 @@ type ConfigBuilder struct {
 	driverConfig *driver.Config
 	vmState      *VMState
 	kernelArgs   KernelCmdLine
+	netResult    interface{} // networking.SetupResult - using interface{} to avoid circular import
 }
 
 // NewConfigBuilder creates a new configuration builder
@@ -39,6 +40,12 @@ func (b *ConfigBuilder) WithCloudInit(datasourceURL string) *ConfigBuilder {
 func (b *ConfigBuilder) WithDebug() *ConfigBuilder {
 	debugArgs := GetDebugKernelArgs()
 	b.kernelArgs.MergeFrom(debugArgs)
+	return b
+}
+
+// WithNetworking sets the networking setup result
+func (b *ConfigBuilder) WithNetworking(netResult interface{}) *ConfigBuilder {
+	b.netResult = netResult
 	return b
 }
 
@@ -148,9 +155,34 @@ func (b *ConfigBuilder) buildDrives() []Drive {
 
 // buildNetworkInterfaces creates network interface configuration
 func (b *ConfigBuilder) buildNetworkInterfaces() []NetworkInterface {
-	// Disable networking for now to avoid TAP device permissions
-	// TODO: Set up proper TAP device permissions or use bridge networking
+	// Check if we have networking setup from the driver
+	if b.netResult == nil {
+		return []NetworkInterface{}
+	}
+
+	// Type assert the network result to determine networking mode
+	// For now, we'll use a simple check - if we can't determine the mode,
+	// assume rootless and return no interfaces (pasta handles networking externally)
+	
+	// In rootless mode (pasta/slirp4netns), Firecracker doesn't need network interfaces
+	// configured because the networking tools attach to the process namespace
+	
+	// TODO: When root mode is implemented, check the result and create TAP interfaces
+	// if result.Mode == "root" && result.TAPDevice != "" {
+	//   return []NetworkInterface{{
+	//     IfaceId:      "eth0",
+	//     HostDevName:  &result.TAPDevice,
+	//     GuestMac:     stringPtr("02:FC:00:00:00:01"),
+	//   }}
+	// }
+	
+	// For rootless mode, return no interfaces - networking handled externally
 	return []NetworkInterface{}
+}
+
+// stringPtr returns a pointer to a string
+func stringPtr(s string) *string {
+	return &s
 }
 
 // buildLogger creates the logger configuration

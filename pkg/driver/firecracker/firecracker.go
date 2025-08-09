@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/containers/common/libnetwork/types"
 
 	"github.com/thi-startup/spitfire/pkg/driver"
 	"github.com/thi-startup/spitfire/pkg/log"
+	"github.com/thi-startup/spitfire/pkg/networking"
 )
 
 const (
@@ -34,6 +36,8 @@ type Driver struct {
 	vmState        *VMState
 	fcConfig       *FirecrackerConfig
 	logger         *logrus.Logger
+	netManager     *networking.Manager
+	netResult      *networking.SetupResult
 }
 
 // NewFirecrackerDriver creates a new Firecracker driver instance
@@ -66,11 +70,18 @@ func NewFirecrackerDriver(config *driver.Config) (driver.Driver, error) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
+	// Create networking manager
+	netManager, err := networking.NewManager(stateRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create networking manager: %w", err)
+	}
+
 	d := &Driver{
 		config:         config,
 		stateRoot:      stateRoot,
 		firecrackerBin: firecrackerBin,
 		logger:         logger,
+		netManager:     netManager,
 	}
 
 	// Build Firecracker configuration
@@ -87,6 +98,24 @@ func (d *Driver) buildFirecrackerConfig() error {
 	fcConfig, vmState, err := BuildFromDriverConfig(d.config, d.stateRoot)
 	if err != nil {
 		return fmt.Errorf("building firecracker config: %w", err)
+	}
+
+	// If we have networking setup, add it to the configuration
+	if d.netResult != nil {
+		// Create a new builder with networking
+		builder := NewConfigBuilder(d.config, vmState)
+		builder.WithNetworking(d.netResult)
+		
+		// Apply driver-specific options
+		if err := applyDriverOptions(builder, d.config.DriverOpts); err != nil {
+			return fmt.Errorf("failed to apply driver options: %w", err)
+		}
+		
+		// Build the configuration with networking
+		fcConfig, err = builder.Build()
+		if err != nil {
+			return fmt.Errorf("failed to build config with networking: %w", err)
+		}
 	}
 
 	// Validate the configuration
@@ -112,6 +141,18 @@ func (d *Driver) Create(ctx context.Context) error {
 			return nil // Already created
 		}
 		d.logger.WithField("vm", d.config.Name).Debug("VM directory exists but no config, recreating")
+	}
+
+	// Set up networking if networks are configured
+	if len(d.config.Networks) > 0 || len(d.config.Ports) > 0 {
+		if err := d.setupVMNetworking(ctx); err != nil {
+			return fmt.Errorf("failed to setup networking: %w", err)
+		}
+		
+		// Rebuild Firecracker configuration with networking
+		if err := d.buildFirecrackerConfig(); err != nil {
+			return fmt.Errorf("failed to rebuild firecracker config with networking: %w", err)
+		}
 	}
 
 	log.Debugf("About to save config to %s", d.vmState.ConfigPath())
@@ -294,6 +335,12 @@ func (d *Driver) Delete(ctx context.Context) error {
 	// Stop the VM first
 	if err := d.Stop(ctx); err != nil {
 		return fmt.Errorf("failed to stop VM before deletion: %w", err)
+	}
+
+	// Clean up networking
+	if err := d.cleanupNetworking(ctx); err != nil {
+		d.logger.WithField("vm", d.config.Name).WithError(err).Warn("failed to cleanup networking")
+		// Don't return error - continue with cleanup
 	}
 
 	// Clean up all state files and directories
@@ -1298,4 +1345,99 @@ This setup configures KVM permissions, network infrastructure, and security sett
 			},
 		},
 	}, nil
+}
+
+// setupVMNetworking configures networking for the VM
+func (d *Driver) setupVMNetworking(ctx context.Context) error {
+	// Convert driver config networking to networking package config
+	// Convert port strings to PortMapping structs
+	var ports []types.PortMapping
+	for _, portStr := range d.config.Ports {
+		// TODO: Parse port string format (e.g., "8080:80/tcp")
+		// For now, skip port parsing
+		_ = portStr
+	}
+
+	netConfig := &networking.Config{
+		Mode:                networking.ModeAuto,
+		Backend:             networking.BackendAuto,
+		Ports:               ports,
+		IPv6:                false, // Default IPv6 to false
+		DisableHostLoopback: true,  // Default to secure mode
+	}
+
+	// Check if user wants specific networking mode
+	if mode, ok := d.config.DriverOpts["network_mode"].(string); ok {
+		switch mode {
+		case "rootless":
+			netConfig.Mode = networking.ModeRootless
+		case "root":
+			netConfig.Mode = networking.ModeRoot
+		case "auto":
+			netConfig.Mode = networking.ModeAuto
+		}
+	}
+
+	// Check if user wants specific backend
+	if backend, ok := d.config.DriverOpts["network_backend"].(string); ok {
+		switch backend {
+		case "pasta":
+			netConfig.Backend = networking.BackendPasta
+		case "slirp4netns":
+			netConfig.Backend = networking.BackendSlirp4netns
+		case "tap":
+			netConfig.Backend = networking.BackendTAP
+		case "bridge":
+			netConfig.Backend = networking.BackendBridge
+		case "auto":
+			netConfig.Backend = networking.BackendAuto
+		}
+	}
+
+	// Set static IP if specified
+	if staticIP, ok := d.config.DriverOpts["static_ip"].(string); ok {
+		netConfig.StaticIP = staticIP
+	}
+
+	// Set MAC address if specified
+	if macAddr, ok := d.config.DriverOpts["mac_address"].(string); ok {
+		netConfig.MACAddress = macAddr
+	} else {
+		// Generate a MAC address for the VM
+		netConfig.MACAddress = networking.GenerateMAC()
+	}
+
+	// Set network name for bridge mode
+	if netName, ok := d.config.DriverOpts["network_name"].(string); ok {
+		netConfig.NetworkName = netName
+	}
+
+	// Setup networking
+	result, err := d.netManager.Setup(ctx, d.config.Name, netConfig)
+	if err != nil {
+		return fmt.Errorf("networking setup failed: %w", err)
+	}
+
+	// Store the result for use in config building
+	d.netResult = result
+
+	log.Progress("Networking configured for VM %s (%s mode with %s backend)", 
+		d.config.Name, result.Mode, result.Backend)
+
+	return nil
+}
+
+// cleanupNetworking tears down networking for the VM
+func (d *Driver) cleanupNetworking(ctx context.Context) error {
+	if d.netManager == nil {
+		return nil
+	}
+
+	if err := d.netManager.Teardown(ctx, d.config.Name); err != nil {
+		log.Warnf("Failed to clean up networking: %v", err)
+		return err
+	}
+
+	d.netResult = nil
+	return nil
 }

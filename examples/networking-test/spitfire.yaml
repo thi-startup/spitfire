@@ -1,0 +1,21 @@
+version: "1"
+driver: firecracker
+
+networks:
+  default:
+    driver: bridge
+
+vms:
+  web-with-net:
+    image: /opt/spitfire/ubuntu.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
+    networks:
+      - default
+    ports:
+      - "8080:80"
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
+      network_mode: "auto"  # Can be: auto, rootless, root
+      network_backend: "auto"  # Can be: auto, pasta, slirp4netns, tap, bridge
