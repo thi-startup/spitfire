@@ -132,6 +132,7 @@ func (d *Driver) buildFirecrackerConfig() error {
 // Create implements driver.Driver
 func (d *Driver) Create(ctx context.Context) error {
 	d.logger.WithField("vm", d.config.Name).Info("creating Firecracker VM")
+	log.Debugf("Driver received config: Name=%s, Networks=%v, Ports=%v", d.config.Name, d.config.Networks, d.config.Ports)
 
 	// Check if VM is already properly configured
 	if d.vmState.Exists() {
@@ -144,7 +145,9 @@ func (d *Driver) Create(ctx context.Context) error {
 	}
 
 	// Set up networking if networks are configured
+	log.Debugf("Checking networking config: Networks=%v, Ports=%v", d.config.Networks, d.config.Ports)
 	if len(d.config.Networks) > 0 || len(d.config.Ports) > 0 {
+		log.Debugf("Setting up networking for VM %s", d.config.Name)
 		if err := d.setupVMNetworking(ctx); err != nil {
 			return fmt.Errorf("failed to setup networking: %w", err)
 		}
@@ -153,6 +156,8 @@ func (d *Driver) Create(ctx context.Context) error {
 		if err := d.buildFirecrackerConfig(); err != nil {
 			return fmt.Errorf("failed to rebuild firecracker config with networking: %w", err)
 		}
+	} else {
+		log.Debugf("No networking configured for VM %s", d.config.Name)
 	}
 
 	log.Debugf("About to save config to %s", d.vmState.ConfigPath())
@@ -1349,12 +1354,15 @@ This setup configures KVM permissions, network infrastructure, and security sett
 
 // setupVMNetworking configures networking for the VM
 func (d *Driver) setupVMNetworking(ctx context.Context) error {
+	log.Debugf("Starting networking setup for VM %s", d.config.Name)
+	
 	// Convert driver config networking to networking package config
 	// Convert port strings to PortMapping structs
 	var ports []types.PortMapping
 	for _, portStr := range d.config.Ports {
 		// TODO: Parse port string format (e.g., "8080:80/tcp")
 		// For now, skip port parsing
+		log.Debugf("Port mapping to parse: %s", portStr)
 		_ = portStr
 	}
 
@@ -1365,6 +1373,8 @@ func (d *Driver) setupVMNetworking(ctx context.Context) error {
 		IPv6:                false, // Default IPv6 to false
 		DisableHostLoopback: true,  // Default to secure mode
 	}
+	
+	log.Debugf("Network config: Mode=%s, Backend=%s", netConfig.Mode, netConfig.Backend)
 
 	// Check if user wants specific networking mode
 	if mode, ok := d.config.DriverOpts["network_mode"].(string); ok {

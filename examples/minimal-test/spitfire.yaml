@@ -1,0 +1,12 @@
+# Minimal VM test without networking
+version: "1"
+driver: firecracker
+
+vms:
+  simple-vm:
+    image: /opt/spitfire/ubuntu.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin

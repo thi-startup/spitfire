@@ -60,7 +60,7 @@ func (vm *VM) ToDriverConfig(name string, globalConfig *Config) (*driver.Config,
 		CPUs:       cpus,
 		DiskSize:   0, // TODO: Add disk size support to config
 		Networks:   vm.getEffectiveNetworks(globalConfig),
-		Ports:      []string{}, // TODO: Add port mapping support
+		Ports:      vm.Ports,
 		Volumes:    volumes,
 		Env:        env,
 		WorkingDir: "", // TODO: Add working directory support

@@ -1,6 +1,9 @@
 # Multi-VM networking test configuration
 # Tests multiple VMs with different networking setups
 
+version: "1"
+driver: firecracker
+
 networks:
   default:
     driver: auto  # Let Spitfire choose the best backend
@@ -8,26 +11,35 @@ networks:
 vms:
   web-1:
     image: /opt/spitfire/ubuntu.ext4
-    memory: 512MB
-    cpus: 1
+    resources:
+      vcpu: 1
+      memory: 512MB
     networks:
       - default
     ports:
       - "8080:80"
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
       
   web-2:
-    image: /opt/spitfire/ubuntu.ext4  
-    memory: 512MB
-    cpus: 1
+    image: /opt/spitfire/ubuntu.ext4
+    resources:
+      vcpu: 1
+      memory: 512MB
     networks:
       - default
     ports:
       - "8081:80"
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
       
   database:
     image: /opt/spitfire/ubuntu.ext4
-    memory: 1024MB
-    cpus: 2
+    resources:
+      vcpu: 2
+      memory: 1024MB
     networks:
       - default
+    driver_opts:
+      kernel: /opt/spitfire/hello-vmlinux.bin
     # No external ports - internal networking only

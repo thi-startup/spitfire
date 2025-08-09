@@ -39,6 +39,7 @@ type VM struct {
 	EnvFile    []string               `yaml:"env_file,omitempty" json:"env_file,omitempty"`
 	DependsOn  []string               `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
 	Networks   []string               `yaml:"networks,omitempty" json:"networks,omitempty"`
+	Ports      []string               `yaml:"ports,omitempty" json:"ports,omitempty"`
 	Restart    string                 `yaml:"restart,omitempty" json:"restart,omitempty"`
 	Kernel     string                 `yaml:"kernel,omitempty" json:"kernel,omitempty"`
 	KernelArgs string                 `yaml:"kernel_args,omitempty" json:"kernel_args,omitempty"`
