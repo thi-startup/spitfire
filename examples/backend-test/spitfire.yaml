@@ -1,0 +1,30 @@
+# Backend-specific networking test configuration
+# Tests different networking backends explicitly
+
+networks:
+  pasta-net:
+    driver: pasta
+    mode: rootless
+    
+  slirp-net:
+    driver: slirp4netns
+    mode: rootless
+
+vms:
+  vm-pasta:
+    image: /opt/spitfire/ubuntu.ext4
+    memory: 512MB  
+    cpus: 1
+    networks:
+      - pasta-net
+    ports:
+      - "9080:80"
+      
+  vm-slirp:
+    image: /opt/spitfire/ubuntu.ext4
+    memory: 512MB
+    cpus: 1
+    networks:
+      - slirp-net
+    ports:
+      - "9081:80"

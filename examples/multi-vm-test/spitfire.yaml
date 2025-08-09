@@ -1,0 +1,33 @@
+# Multi-VM networking test configuration
+# Tests multiple VMs with different networking setups
+
+networks:
+  default:
+    driver: auto  # Let Spitfire choose the best backend
+
+vms:
+  web-1:
+    image: /opt/spitfire/ubuntu.ext4
+    memory: 512MB
+    cpus: 1
+    networks:
+      - default
+    ports:
+      - "8080:80"
+      
+  web-2:
+    image: /opt/spitfire/ubuntu.ext4  
+    memory: 512MB
+    cpus: 1
+    networks:
+      - default
+    ports:
+      - "8081:80"
+      
+  database:
+    image: /opt/spitfire/ubuntu.ext4
+    memory: 1024MB
+    cpus: 2
+    networks:
+      - default
+    # No external ports - internal networking only
