@@ -149,6 +149,14 @@ func (d *Driver) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
+	// Clean up stale socket file if it exists
+	socketPath := d.vmState.SocketPath()
+	if _, err := os.Stat(socketPath); err == nil {
+		if err := os.Remove(socketPath); err != nil {
+			return fmt.Errorf("failed to remove stale socket file: %w", err)
+		}
+	}
+
 	// Get the configuration file path
 	configPath := d.vmState.ConfigPath()
 
